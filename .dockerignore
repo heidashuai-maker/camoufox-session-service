@@ -3,9 +3,9 @@
 .venv
 .tmp
 .pytest_cache
+.pytest-*
 artifacts
 build
 dist
 __pycache__
 *.pyc
-
