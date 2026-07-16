@@ -1,3 +1,5 @@
+"""内存 Session 元数据、Worker 绑定与过期回收。"""
+
 from __future__ import annotations
 
 import time
@@ -8,6 +10,8 @@ from dataclasses import dataclass
 
 @dataclass(slots=True)
 class SessionRecord:
+    """记录 Session 所属 Worker、Worker 代际和有效时间。"""
+
     session_id: str
     worker_id: int
     worker_generation: int
@@ -26,6 +30,8 @@ class SessionRecord:
 
 
 class SessionRegistry:
+    """管理 Session 元数据的创建、查询、删除和过期回收。"""
+
     def __init__(self, ttl_seconds: int, clock: Callable[[], float] = time.monotonic):
         self.ttl_seconds = ttl_seconds
         self.clock = clock
@@ -39,6 +45,8 @@ class SessionRegistry:
         session_id: str | None = None,
         ttl_seconds: int | None = None,
     ) -> SessionRecord:
+        """创建记录，并把 Session 固定到指定 Worker 及其当前代际。"""
+
         now = self.clock()
         record = SessionRecord(
             session_id=session_id or uuid.uuid4().hex,
@@ -52,6 +60,8 @@ class SessionRegistry:
         return record
 
     def get(self, session_id: str) -> SessionRecord | None:
+        """返回未过期记录并刷新最后使用时间；过期记录直接移除。"""
+
         record = self._records.get(session_id)
         if record is None:
             return None
@@ -66,6 +76,8 @@ class SessionRegistry:
         return self._records.pop(session_id, None)
 
     def expire(self) -> list[SessionRecord]:
+        """移除全部过期记录，并返回它们供调用方关闭浏览器上下文。"""
+
         now = self.clock()
         expired = [record for record in self._records.values() if now >= record.expires_at]
         for record in expired:

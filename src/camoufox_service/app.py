@@ -1,3 +1,5 @@
+"""FastAPI 应用装配、鉴权、异常映射与 HTTP 路由。"""
+
 from __future__ import annotations
 
 import sys
@@ -25,6 +27,8 @@ def create_app(
     settings: Settings | None = None,
     supervisor: WorkerSupervisor | None = None,
 ) -> FastAPI:
+    """组装服务依赖、生命周期、异常映射和所有 HTTP 路由。"""
+
     service_settings = settings or Settings.from_env()
     service_supervisor = supervisor or WorkerSupervisor(
         [sys.executable, "-u", "-m", "camoufox_service.worker"],
@@ -49,6 +53,8 @@ def create_app(
     app.state.sessions = registry
 
     async def expire_sessions() -> None:
+        """回收 Registry 中已过期的记录及其 Worker 浏览器上下文。"""
+
         for record in registry.expire():
             try:
                 await service_supervisor.request(
@@ -111,6 +117,8 @@ def create_app(
 
     @app.post("/v1/sessions", response_model=TaskResult, dependencies=[Depends(authorize)])
     async def create_session(request: SessionCreateRequest):
+        """在选定 Worker 中创建持久上下文，并记录其 Worker 代际。"""
+
         await expire_sessions()
         session_id = uuid.uuid4().hex
         payload = request.model_dump(mode="json")
@@ -138,6 +146,8 @@ def create_app(
         dependencies=[Depends(authorize)],
     )
     async def session_request(session_id: str, request: SessionRequest):
+        """把请求发回 Session 所绑定的 Worker，并拒绝失效代际。"""
+
         await expire_sessions()
         record = registry.get(session_id)
         if not record:

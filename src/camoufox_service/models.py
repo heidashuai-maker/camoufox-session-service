@@ -1,3 +1,5 @@
+"""HTTP 请求、响应、Cookie、代理与浏览器选项模型。"""
+
 from __future__ import annotations
 
 from typing import Any, Literal
@@ -7,10 +9,14 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, mod
 
 
 class StrictModel(BaseModel):
+    """拒绝未声明字段，并允许按 API 别名填充字段的基础模型。"""
+
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
 class ProxyConfig(StrictModel):
+    """接收结构化代理信息，并生成 Playwright 使用的代理地址。"""
+
     host: str
     port: int = Field(ge=1, le=65535)
     protocol: Literal["http", "https", "socks4", "socks5"] = "http"
@@ -19,6 +25,8 @@ class ProxyConfig(StrictModel):
 
     @classmethod
     def from_url(cls, value: str) -> ProxyConfig:
+        """解析代理 URL，同时校验协议、主机和端口。"""
+
         parsed = urlparse(value)
         protocol = "socks5" if parsed.scheme.lower() == "socks5h" else parsed.scheme.lower()
         if protocol not in {"http", "https", "socks4", "socks5"}:
@@ -38,6 +46,8 @@ class ProxyConfig(StrictModel):
 
 
 class BrowserOptions(StrictModel):
+    """所有浏览器任务共享的 User-Agent、代理、区域和超时选项。"""
+
     proxy: ProxyConfig | None = None
     userAgent: str | None = None
     locale: str = "en-US"
@@ -138,6 +148,8 @@ Outcome = Literal[
 
 
 class TaskResult(StrictModel):
+    """统一返回任务状态、令牌、Cookie、页面信息和错误详情。"""
+
     status: Outcome
     token: str | None = None
     sessionId: str | None = None

@@ -1,3 +1,5 @@
+"""浏览器启动参数、Cookie 导出与通用页面信息读取。"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -15,11 +17,15 @@ _BROWSER_CRASH_MARKERS = (
 
 
 def is_browser_crash_error(exc: Exception) -> bool:
+    """判断异常是否表示浏览器或 Playwright 驱动连接已经失效。"""
+
     message = str(exc).lower()
     return any(marker in message for marker in _BROWSER_CRASH_MARKERS)
 
 
 def context_options(options: BrowserOptions) -> dict[str, Any]:
+    """把公共 API 浏览器选项转换为 Camoufox Context 参数。"""
+
     result: dict[str, Any] = {"locale": options.locale}
     if options.userAgent:
         result["user_agent"] = options.userAgent
@@ -36,6 +42,8 @@ def context_options(options: BrowserOptions) -> dict[str, Any]:
 
 
 def cookies_from_context(context) -> list[Cookie]:
+    """将 Playwright Cookie 转换为稳定的 API Cookie 模型。"""
+
     cookies = []
     for raw in context.cookies():
         cookies.append(

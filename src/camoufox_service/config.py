@@ -1,3 +1,5 @@
+"""从环境变量加载并校验服务配置。"""
+
 from __future__ import annotations
 
 import os
@@ -35,6 +37,8 @@ def _headless(name: str, default: bool) -> bool | str:
 
 @dataclass(frozen=True, slots=True)
 class Settings:
+    """保存经过类型转换和边界校验的运行配置。"""
+
     host: str
     port: int
     auth_token: str | None
@@ -49,6 +53,8 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> Settings:
+        """读取环境变量，并用项目默认值补齐未设置项。"""
+
         return cls(
             host=os.getenv("HOST", "0.0.0.0"),
             port=_integer("PORT", 3000),
