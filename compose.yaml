@@ -3,6 +3,7 @@ services:
     build: .
     image: camoufox-session-service:local
     restart: unless-stopped
+    init: true
     ports:
       - "${PORT:-3000}:${PORT:-3000}"
     env_file:

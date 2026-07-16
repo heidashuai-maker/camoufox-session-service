@@ -137,4 +137,7 @@ docker compose up -d
 curl http://127.0.0.1:3000/health/ready
 ```
 
-The image contains no Chromium or Node.js runtime. Worker subprocesses own Camoufox instances; if a browser task exceeds its hard deadline, the supervisor terminates that process tree and starts a replacement before accepting more work on that slot.
+The image contains no Chromium runtime. Compose enables a minimal init process so
+terminated browser descendants are reaped. Worker subprocesses own Camoufox
+instances; if a browser task exceeds its hard deadline, the supervisor terminates
+that process tree and starts a replacement before accepting more work on that slot.
