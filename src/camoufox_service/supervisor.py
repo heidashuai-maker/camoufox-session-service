@@ -160,7 +160,10 @@ class WorkerProcess:
                     self.process.kill()
                 except ProcessLookupError:
                     pass
-                await self.process.wait()
+                try:
+                    await asyncio.wait_for(self.process.wait(), timeout=1)
+                except (TimeoutError, ProcessLookupError):
+                    pass
         current = asyncio.current_task()
         tasks = []
         for task in (self.reader_task, self.stderr_task):
