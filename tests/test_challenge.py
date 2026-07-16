@@ -68,6 +68,16 @@ def test_detects_cloudflare_interstitial_from_page_markers():
     assert evidence.vendor == "cloudflare"
 
 
+def test_detects_cloudflare_challenge_from_redirect_url():
+    page = FakePage()
+    page.url = "https://example.test/?__cf_chl_rt_tk=opaque"
+
+    evidence = detect_challenge(page)
+
+    assert evidence.detected is True
+    assert evidence.vendor == "cloudflare"
+
+
 def test_challenge_without_markers_returns_no_challenge_and_closes_context(monkeypatch):
     browser = FakeBrowser(FakePage())
     times = iter([0.0, 2.0, 2.1, 2.2])

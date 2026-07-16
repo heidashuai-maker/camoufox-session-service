@@ -23,11 +23,14 @@ class ChallengeEvidence:
 def detect_challenge(page) -> ChallengeEvidence:
     title = (page.title() or "").lower()
     body = (page.content() or "").lower()
+    current_url = str(page.url or "").lower()
     frame_urls = " ".join(str(frame.url or "").lower() for frame in page.frames)
     markers = (
         "just a moment" in title,
         "challenge-form" in body,
         "cf-chl-" in body,
+        "__cf_chl_" in current_url,
+        "/cdn-cgi/challenge-platform/" in current_url,
         "challenges.cloudflare.com" in frame_urls,
         "/cdn-cgi/challenge-platform/" in frame_urls,
     )
