@@ -9,11 +9,13 @@ from .browser import context_options, cookies_from_context, page_user_agent
 from .challenge import solve_challenge
 from .models import (
     ChallengeRequest,
+    RecaptchaV2Request,
     SessionCreateRequest,
     SessionRequest,
     TaskResult,
     TurnstileRequest,
 )
+from .recaptcha import solve_recaptcha
 from .turnstile import solve_turnstile
 
 
@@ -114,6 +116,8 @@ class BrowserRuntime:
             return solve_turnstile(self._browser(), TurnstileRequest.model_validate(payload)).model_dump(mode="json")
         if kind == "challenge.solve":
             return solve_challenge(self._browser(), ChallengeRequest.model_validate(payload)).model_dump(mode="json")
+        if kind == "recaptcha.v2.solve":
+            return solve_recaptcha(self._browser(), RecaptchaV2Request.model_validate(payload)).model_dump(mode="json")
         if kind == "session.create":
             return self.create_session(dict(payload))
         if kind == "session.request":
@@ -145,4 +149,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
