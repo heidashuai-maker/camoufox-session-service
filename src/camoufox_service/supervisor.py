@@ -150,9 +150,13 @@ class WorkerProcess:
                 self.process.kill()
                 await self.process.wait()
         current = asyncio.current_task()
+        tasks = []
         for task in (self.reader_task, self.stderr_task):
             if task and task is not current and not task.done():
                 task.cancel()
+                tasks.append(task)
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         self.process = None
 
 
@@ -199,6 +203,11 @@ class WorkerSupervisor:
     async def _start_worker(self, worker_id: int) -> WorkerProcess:
         worker = WorkerProcess(worker_id, self.command, self.cwd)
         await worker.start()
+        try:
+            await asyncio.wait_for(worker.request("health", {}), timeout=max(10, self.task_timeout))
+        except Exception:
+            await worker.stop()
+            raise
         self._workers[worker_id] = worker
         return worker
 
@@ -303,4 +312,3 @@ class WorkerSupervisor:
                 for worker_id, worker in self._workers.items()
             },
         }
-

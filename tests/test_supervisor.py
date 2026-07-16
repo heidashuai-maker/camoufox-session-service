@@ -50,3 +50,19 @@ async def test_timeout_replaces_worker_and_next_request_succeeds(fake_worker_com
     finally:
         await supervisor.stop()
 
+
+@pytest.mark.asyncio
+async def test_start_fails_when_worker_health_probe_fails(tmp_path):
+    script = tmp_path / "broken_worker.py"
+    script.write_text("raise SystemExit(1)\n", encoding="utf-8")
+    supervisor = WorkerSupervisor(
+        [sys.executable, "-u", str(script)],
+        workers=1,
+        queue_size=1,
+        task_timeout=1,
+    )
+
+    with pytest.raises(Exception):
+        await supervisor.start()
+
+    assert supervisor.ready() is False

@@ -61,3 +61,11 @@ def test_settings_read_worker_limits(monkeypatch):
 
     assert settings.workers == 3
     assert settings.queue_size == 9
+
+
+def test_settings_accept_virtual_display(monkeypatch):
+    monkeypatch.setenv("CAMOUFOX_HEADLESS", "virtual")
+
+    settings = Settings.from_env()
+
+    assert settings.headless == "virtual"

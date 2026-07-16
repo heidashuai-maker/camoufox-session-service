@@ -23,6 +23,16 @@ def _boolean(name: str, default: bool) -> bool:
     raise ValueError(f"{name} must be a boolean")
 
 
+def _headless(name: str, default: bool) -> bool | str:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in {"virtual", "xvfb"}:
+        return "virtual"
+    return _boolean(name, default)
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     host: str
@@ -35,7 +45,7 @@ class Settings:
     max_jobs_per_worker: int
     max_worker_lifetime_seconds: int
     max_worker_rss_mb: int
-    headless: bool
+    headless: bool | str
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -50,6 +60,5 @@ class Settings:
             max_jobs_per_worker=_integer("CAMOUFOX_MAX_JOBS_PER_WORKER", 50),
             max_worker_lifetime_seconds=_integer("CAMOUFOX_MAX_WORKER_LIFETIME_SECONDS", 1800),
             max_worker_rss_mb=_integer("CAMOUFOX_MAX_WORKER_RSS_MB", 1536),
-            headless=_boolean("CAMOUFOX_HEADLESS", True),
+            headless=_headless("CAMOUFOX_HEADLESS", True),
         )
-

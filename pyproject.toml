@@ -8,16 +8,18 @@ version = "0.1.0"
 description = "A supervised Camoufox browser session service"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = [
     "camoufox[geoip]>=0.4.11,<0.5",
-    "fastapi>=0.115,<1",
+    "fastapi>=0.115,<0.116",
     "psutil>=6,<8",
     "pydantic>=2.9,<3",
     "pydub>=0.25,<1",
+    "playwright==1.50.0",
     "requests>=2.31,<3",
     "SpeechRecognition>=3.10,<4",
-    "uvicorn[standard]>=0.34,<1",
+    "uvicorn[standard]>=0.34,<0.35",
 ]
 
 [project.optional-dependencies]
@@ -25,7 +27,7 @@ test = [
     "build>=1.2,<2",
     "httpx>=0.27,<1",
     "pytest>=8,<10",
-    "pytest-asyncio>=0.24,<2",
+    "pytest-asyncio>=0.24,<1",
 ]
 
 [tool.setuptools.packages.find]
@@ -35,4 +37,3 @@ where = ["src"]
 pythonpath = ["src"]
 testpaths = ["tests"]
 asyncio_default_fixture_loop_scope = "function"
-

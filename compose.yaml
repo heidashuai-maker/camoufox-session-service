@@ -1,0 +1,17 @@
+services:
+  camoufox-session-service:
+    build: .
+    image: camoufox-session-service:local
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - path: .env
+        required: false
+    shm_size: 1gb
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+          cpus: "2.0"
+

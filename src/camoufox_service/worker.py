@@ -111,7 +111,15 @@ class BrowserRuntime:
 
     def handle(self, kind: str, payload: dict) -> dict:
         if kind == "health":
-            return {"status": "ok", "sessions": len(self.sessions)}
+            browser = self._browser()
+            connected = not hasattr(browser, "is_connected") or browser.is_connected()
+            if not connected:
+                raise RuntimeError("Camoufox browser is not connected")
+            return {
+                "status": "ok",
+                "sessions": len(self.sessions),
+                "browserVersion": getattr(browser, "version", None),
+            }
         if kind == "turnstile.solve":
             return solve_turnstile(self._browser(), TurnstileRequest.model_validate(payload)).model_dump(mode="json")
         if kind == "challenge.solve":

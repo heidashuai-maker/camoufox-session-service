@@ -42,7 +42,6 @@ class BrowserOptions(StrictModel):
     userAgent: str | None = None
     locale: str = "en-US"
     timezone: str | None = None
-    headless: bool | Literal["virtual", "xvfb"] | None = None
     timeoutMs: int = Field(default=120_000, ge=1_000, le=600_000)
 
     @field_validator("proxy", mode="before")
