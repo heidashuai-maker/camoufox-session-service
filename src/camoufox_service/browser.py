@@ -5,6 +5,21 @@ from typing import Any
 from .models import BrowserOptions, Cookie
 
 
+_BROWSER_CRASH_MARKERS = (
+    "browser has been closed",
+    "browser closed",
+    "browser disconnected",
+    "target page, context or browser has been closed",
+    "connection closed",
+    "playwright driver",
+)
+
+
+def is_browser_crash_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return any(marker in message for marker in _BROWSER_CRASH_MARKERS)
+
+
 def context_options(options: BrowserOptions) -> dict[str, Any]:
     result: dict[str, Any] = {"locale": options.locale}
     if options.userAgent:
@@ -46,4 +61,3 @@ def page_user_agent(page) -> str | None:
 
 def response_status(response) -> int | None:
     return int(response.status) if response is not None and response.status is not None else None
-

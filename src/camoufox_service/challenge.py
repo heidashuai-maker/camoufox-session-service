@@ -3,7 +3,13 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
-from .browser import context_options, cookies_from_context, page_user_agent, response_status
+from .browser import (
+    context_options,
+    cookies_from_context,
+    is_browser_crash_error,
+    page_user_agent,
+    response_status,
+)
 from .models import ChallengeRequest, ErrorInfo, TaskResult
 
 
@@ -39,8 +45,9 @@ def detect_challenge(page) -> ChallengeEvidence:
 
 def solve_challenge(browser, request: ChallengeRequest) -> TaskResult:
     started = time.monotonic()
-    context = browser.new_context(**context_options(request))
+    context = None
     try:
+        context = browser.new_context(**context_options(request))
         page = context.new_page()
         response = page.goto(
             str(request.url),
@@ -73,15 +80,26 @@ def solve_challenge(browser, request: ChallengeRequest) -> TaskResult:
     except Exception as exc:
         message = str(exc)
         timed_out = "timeout" in message.lower()
+        browser_crashed = is_browser_crash_error(exc)
+        if browser_crashed:
+            status = "browser_crashed"
+            error_type = "BROWSER_CRASH"
+        elif timed_out:
+            status = "timeout"
+            error_type = "CHALLENGE_TIMEOUT"
+        else:
+            status = "failed"
+            error_type = "CHALLENGE_FAILED"
         return TaskResult(
-            status="timeout" if timed_out else "failed",
+            status=status,
             elapsedMs=int((time.monotonic() - started) * 1000),
             error=ErrorInfo(
-                type="CHALLENGE_TIMEOUT" if timed_out else "CHALLENGE_FAILED",
+                type=error_type,
                 message=message,
                 retryable=True,
                 stage="challenge",
             ),
         )
     finally:
-        context.close()
+        if context is not None:
+            context.close()

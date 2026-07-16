@@ -4,6 +4,8 @@ import textwrap
 import pytest
 
 from camoufox_service.supervisor import WorkerSupervisor, WorkerTimeout
+from camoufox_service.models import TaskResult
+from camoufox_service.worker import BrowserRuntime
 
 
 @pytest.fixture
@@ -66,3 +68,10 @@ async def test_start_fails_when_worker_health_probe_fails(tmp_path):
         await supervisor.start()
 
     assert supervisor.ready() is False
+
+
+def test_worker_escalates_browser_crash_to_supervisor():
+    runtime = BrowserRuntime()
+
+    with pytest.raises(RuntimeError, match="browser process crashed"):
+        runtime.serialize_result(TaskResult(status="browser_crashed", elapsedMs=1))

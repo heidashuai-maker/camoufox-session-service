@@ -56,6 +56,11 @@ class FakeBrowser:
         return self.context
 
 
+class CrashedBrowser:
+    def new_context(self, **options):
+        raise RuntimeError("Browser has been closed")
+
+
 def test_turnstile_template_escapes_script_boundary_and_includes_options():
     html = build_turnstile_html(
         TurnstileRequest(
@@ -91,3 +96,14 @@ def test_minimal_turnstile_returns_token_and_closes_context():
     assert result.cookies[0].name == "sid"
     assert browser.context.closed is True
 
+
+def test_browser_disconnect_is_reported_as_crash():
+    result = solve_turnstile(
+        CrashedBrowser(),
+        TurnstileRequest(
+            url="https://example.test",
+            siteKey="1x00000000000000000000AA",
+        ),
+    )
+
+    assert result.status == "browser_crashed"

@@ -1,7 +1,9 @@
 FROM python:3.11-slim-bookworm
 
 ENV PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=5
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \

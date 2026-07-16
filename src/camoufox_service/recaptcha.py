@@ -6,7 +6,12 @@ import time
 from dataclasses import dataclass
 from urllib.parse import urlsplit, urlunsplit
 
-from .browser import context_options, cookies_from_context, page_user_agent
+from .browser import (
+    context_options,
+    cookies_from_context,
+    is_browser_crash_error,
+    page_user_agent,
+)
 from .models import ErrorInfo, RecaptchaV2Request, TaskResult
 from .recaptcha_audio import AudioChallengeProcessor
 
@@ -339,9 +344,10 @@ class RecaptchaV2Solver:
 
     def solve(self, request: RecaptchaV2Request) -> TaskResult:
         started = time.monotonic()
-        context = self.browser.new_context(**context_options(request))
+        context = None
         processor = None
         try:
+            context = self.browser.new_context(**context_options(request))
             page = context.new_page()
             phase = {"value": "session"}
             audio_cache: dict[str, bytes] = {}
@@ -374,11 +380,18 @@ class RecaptchaV2Solver:
             )
         except Exception as exc:
             rate_limited = isinstance(exc, RecaptchaRateLimited)
+            browser_crashed = is_browser_crash_error(exc)
+            if browser_crashed:
+                error_type = "BROWSER_CRASH"
+            elif rate_limited:
+                error_type = "RECAPTCHA_RATE_LIMIT"
+            else:
+                error_type = "RECAPTCHA_FAILED"
             return TaskResult(
-                status="failed",
+                status="browser_crashed" if browser_crashed else "failed",
                 elapsedMs=int((time.monotonic() - started) * 1000),
                 error=ErrorInfo(
-                    type="RECAPTCHA_RATE_LIMIT" if rate_limited else "RECAPTCHA_FAILED",
+                    type=error_type,
                     message=str(exc),
                     retryable=True,
                     stage="recaptcha",
@@ -387,7 +400,8 @@ class RecaptchaV2Solver:
         finally:
             if processor:
                 processor.close()
-            context.close()
+            if context is not None:
+                context.close()
 
 
 def solve_recaptcha(browser, request: RecaptchaV2Request) -> TaskResult:

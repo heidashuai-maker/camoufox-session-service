@@ -60,6 +60,12 @@ class BrowserRuntime:
         self.open()
         return self.browser
 
+    @staticmethod
+    def serialize_result(result: TaskResult) -> dict:
+        if result.status == "browser_crashed":
+            raise RuntimeError("browser process crashed")
+        return result.model_dump(mode="json")
+
     def create_session(self, payload: dict) -> dict:
         request = SessionCreateRequest.model_validate(payload)
         session_id = str(payload["sessionId"])
@@ -121,11 +127,17 @@ class BrowserRuntime:
                 "browserVersion": getattr(browser, "version", None),
             }
         if kind == "turnstile.solve":
-            return solve_turnstile(self._browser(), TurnstileRequest.model_validate(payload)).model_dump(mode="json")
+            return self.serialize_result(
+                solve_turnstile(self._browser(), TurnstileRequest.model_validate(payload))
+            )
         if kind == "challenge.solve":
-            return solve_challenge(self._browser(), ChallengeRequest.model_validate(payload)).model_dump(mode="json")
+            return self.serialize_result(
+                solve_challenge(self._browser(), ChallengeRequest.model_validate(payload))
+            )
         if kind == "recaptcha.v2.solve":
-            return solve_recaptcha(self._browser(), RecaptchaV2Request.model_validate(payload)).model_dump(mode="json")
+            return self.serialize_result(
+                solve_recaptcha(self._browser(), RecaptchaV2Request.model_validate(payload))
+            )
         if kind == "session.create":
             return self.create_session(dict(payload))
         if kind == "session.request":

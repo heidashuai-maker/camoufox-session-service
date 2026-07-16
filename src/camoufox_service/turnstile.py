@@ -3,7 +3,13 @@ from __future__ import annotations
 import json
 import time
 
-from .browser import context_options, cookies_from_context, page_user_agent, response_status
+from .browser import (
+    context_options,
+    cookies_from_context,
+    is_browser_crash_error,
+    page_user_agent,
+    response_status,
+)
 from .models import ErrorInfo, TaskResult, TurnstileRequest
 
 
@@ -72,8 +78,9 @@ def _install_minimal_route(page, request: TurnstileRequest) -> None:
 
 def solve_turnstile(browser, request: TurnstileRequest) -> TaskResult:
     started = time.monotonic()
-    context = browser.new_context(**context_options(request))
+    context = None
     try:
+        context = browser.new_context(**context_options(request))
         page = context.new_page()
         if request.strategy == "minimal":
             _install_minimal_route(page, request)
@@ -98,16 +105,26 @@ def solve_turnstile(browser, request: TurnstileRequest) -> TaskResult:
     except Exception as exc:
         message = str(exc)
         timed_out = "timeout" in message.lower()
+        browser_crashed = is_browser_crash_error(exc)
+        if browser_crashed:
+            status = "browser_crashed"
+            error_type = "BROWSER_CRASH"
+        elif timed_out:
+            status = "timeout"
+            error_type = "TURNSTILE_TIMEOUT"
+        else:
+            status = "failed"
+            error_type = "TURNSTILE_FAILED"
         return TaskResult(
-            status="timeout" if timed_out else "failed",
+            status=status,
             elapsedMs=int((time.monotonic() - started) * 1000),
             error=ErrorInfo(
-                type="TURNSTILE_TIMEOUT" if timed_out else "TURNSTILE_FAILED",
+                type=error_type,
                 message=message,
                 retryable=True,
                 stage="turnstile",
             ),
         )
     finally:
-        context.close()
-
+        if context is not None:
+            context.close()
