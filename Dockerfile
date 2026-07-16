@@ -45,8 +45,9 @@ RUN python -m pip install --no-cache-dir .
 
 RUN useradd --create-home --uid 10001 service \
     && chown -R service:service /app /home/service
+RUN XDG_CACHE_HOME=/home/service/.cache python -m camoufox fetch \
+    && chown -R service:service /home/service/.cache
 USER service
-RUN python -m camoufox fetch
 
 EXPOSE 3000
 
