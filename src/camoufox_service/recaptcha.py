@@ -125,8 +125,10 @@ class FrameState:
 
     def checked(self) -> bool:
         try:
-            value = self.anchor(timeout=0.5).locator("#recaptcha-anchor").first.get_attribute(
-                "aria-checked", timeout=500
+            value = (
+                self.anchor(timeout=0.5)
+                .locator("#recaptcha-anchor")
+                .first.get_attribute("aria-checked", timeout=500)
             )
             return str(value).lower() == "true"
         except Exception:
@@ -141,7 +143,9 @@ class FrameState:
     def audio_ready(self) -> bool:
         try:
             frame = self.challenge(timeout=0.5)
-            return self.visible(frame, "#audio-response") and self.visible(frame, "#recaptcha-verify-button")
+            return self.visible(frame, "#audio-response") and self.visible(
+                frame, "#recaptcha-verify-button"
+            )
         except RecaptchaError:
             return False
 
@@ -149,7 +153,11 @@ class FrameState:
         try:
             frame = self.challenge(timeout=0.5)
             text = frame.locator("body").inner_text(timeout=500).lower()
-            return "try again later" in text or "automated queries" in text or self.visible(frame, ".rc-doscaptcha-header")
+            return (
+                "try again later" in text
+                or "automated queries" in text
+                or self.visible(frame, ".rc-doscaptcha-header")
+            )
         except Exception:
             return False
 
@@ -159,7 +167,7 @@ class FrameState:
             ("#audio-source", "src"),
             ("audio source", "src"),
             ("audio", "src"),
-            ('.rc-audiochallenge-tdownload-link', "href"),
+            (".rc-audiochallenge-tdownload-link", "href"),
             ('a[href*="payload"]', "href"),
         )
         deadline = time.monotonic() + (timeout or self.timeout)
@@ -176,7 +184,9 @@ class FrameState:
 
     def audio_language(self) -> str:
         try:
-            source = self.page.locator('iframe[src*="/recaptcha/"][src*="/anchor"]').first.get_attribute("src")
+            source = self.page.locator(
+                'iframe[src*="/recaptcha/"][src*="/anchor"]'
+            ).first.get_attribute("src")
             query = urlsplit(source).query
             for part in query.split("&"):
                 if part.startswith("hl="):
@@ -207,7 +217,8 @@ class RecaptchaAudioSolver:
     def token(self) -> str:
         try:
             value = self.page.evaluate(
-                "() => window.__recaptchaToken || document.querySelector('#g-recaptcha-response')?.value || ''"
+                "() => window.__recaptchaToken || "
+                "document.querySelector('#g-recaptcha-response')?.value || ''"
             )
             return str(value or "").strip()
         except Exception:
@@ -248,7 +259,11 @@ class RecaptchaAudioSolver:
         if existing:
             return RecaptchaSolveResult(existing, 0)
         visible = self._wait(
-            lambda: self.frames.checkbox_visible() or self.frames.audio_button_visible() or self.frames.audio_ready(),
+            lambda: (
+                self.frames.checkbox_visible()
+                or self.frames.audio_button_visible()
+                or self.frames.audio_ready()
+            ),
             35,
         )
         if not visible:
@@ -257,7 +272,10 @@ class RecaptchaAudioSolver:
             raise RecaptchaRateLimited("reCAPTCHA rate limited")
         if self.frames.checkbox_visible():
             self.frames.click(self.frames.anchor().locator(".rc-anchor-content").first)
-            solved = self._wait(lambda: self.token() or self.frames.checked() or self.frames.audio_button_visible(), self.timeout)
+            solved = self._wait(
+                lambda: self.token() or self.frames.checked() or self.frames.audio_button_visible(),
+                self.timeout,
+            )
             if solved and (self.token() or self.frames.checked()):
                 return RecaptchaSolveResult(self._wait_token(), 0)
         if not self.frames.audio_ready():
@@ -271,7 +289,9 @@ class RecaptchaAudioSolver:
             if self.frames.rate_limited():
                 raise RecaptchaRateLimited("reCAPTCHA rate limited")
             audio_url = self._wait(
-                lambda: choose_fresh_audio_url(self.read_audio_url(), previous_url),
+                lambda previous_url=previous_url: choose_fresh_audio_url(
+                    self.read_audio_url(), previous_url
+                ),
                 self.timeout,
             )
             if not audio_url:
@@ -316,7 +336,9 @@ class RecaptchaV2Solver:
         raise last_error or RecaptchaError("navigation failed")
 
     @staticmethod
-    def _setup_network(page, request: RecaptchaV2Request, phase: dict, audio_cache: dict[str, bytes]) -> None:
+    def _setup_network(
+        page, request: RecaptchaV2Request, phase: dict, audio_cache: dict[str, bytes]
+    ) -> None:
         target = str(request.url).rstrip("/")
 
         def remember_audio(response):
@@ -333,8 +355,15 @@ class RecaptchaV2Solver:
             current = route.request.url.rstrip("/")
             resource_type = route.request.resource_type
             if phase["value"] == "captcha" and current == target and resource_type == "document":
-                route.fulfill(status=200, content_type="text/html; charset=utf-8", body=build_recaptcha_html(request))
-            elif resource_type in {"image", "stylesheet", "font", "media"} and "recaptcha" not in route.request.url:
+                route.fulfill(
+                    status=200,
+                    content_type="text/html; charset=utf-8",
+                    body=build_recaptcha_html(request),
+                )
+            elif (
+                resource_type in {"image", "stylesheet", "font", "media"}
+                and "recaptcha" not in route.request.url
+            ):
                 route.abort()
             else:
                 route.continue_()

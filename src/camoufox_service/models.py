@@ -18,7 +18,7 @@ class ProxyConfig(StrictModel):
     password: str | None = None
 
     @classmethod
-    def from_url(cls, value: str) -> "ProxyConfig":
+    def from_url(cls, value: str) -> ProxyConfig:
         parsed = urlparse(value)
         protocol = "socks5" if parsed.scheme.lower() == "socks5h" else parsed.scheme.lower()
         if protocol not in {"http", "https", "socks4", "socks5"}:
@@ -74,7 +74,7 @@ class TurnstileRequest(BrowserOptions):
     language: str = Field(default="auto", max_length=16)
 
     @model_validator(mode="after")
-    def require_site_key_for_minimal(self) -> "TurnstileRequest":
+    def require_site_key_for_minimal(self) -> TurnstileRequest:
         if self.strategy == "minimal" and not self.siteKey:
             raise ValueError("siteKey is required for minimal strategy")
         return self
@@ -88,11 +88,11 @@ class ChallengeRequest(BrowserOptions):
 
 class SessionCreateRequest(BrowserOptions):
     ttlSeconds: int | None = Field(default=None, ge=30, le=86_400)
-    cookies: list["Cookie"] = Field(default_factory=list, max_length=100)
+    cookies: list[Cookie] = Field(default_factory=list, max_length=100)
 
     @field_validator("cookies")
     @classmethod
-    def require_cookie_domains(cls, cookies: list["Cookie"]) -> list["Cookie"]:
+    def require_cookie_domains(cls, cookies: list[Cookie]) -> list[Cookie]:
         if any(not cookie.domain for cookie in cookies):
             raise ValueError("session cookies require a domain")
         return cookies

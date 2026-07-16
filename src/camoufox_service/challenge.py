@@ -33,8 +33,7 @@ def detect_challenge(page) -> ChallengeEvidence:
     )
     detected = any(markers)
     interactive = detected and any(
-        marker in body
-        for marker in ("verify you are human", "cf-turnstile", "challenge-stage")
+        marker in body for marker in ("verify you are human", "cf-turnstile", "challenge-stage")
     )
     return ChallengeEvidence(
         detected=detected,

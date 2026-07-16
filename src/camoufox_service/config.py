@@ -48,7 +48,7 @@ class Settings:
     headless: bool | str
 
     @classmethod
-    def from_env(cls) -> "Settings":
+    def from_env(cls) -> Settings:
         return cls(
             host=os.getenv("HOST", "0.0.0.0"),
             port=_integer("PORT", 3000),

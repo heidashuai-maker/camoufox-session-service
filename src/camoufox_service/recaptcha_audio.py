@@ -154,4 +154,3 @@ class AudioChallengeProcessor:
             raise AudioChallengeError("ffmpeg and ffprobe are required")
         pydub.AudioSegment.converter = ffmpeg
         pydub.utils.get_prober_name = lambda: ffprobe
-

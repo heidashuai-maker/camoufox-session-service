@@ -4,7 +4,6 @@ from typing import Any
 
 from .models import BrowserOptions, Cookie
 
-
 _BROWSER_CRASH_MARKERS = (
     "browser has been closed",
     "browser closed",

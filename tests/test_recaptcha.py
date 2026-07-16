@@ -146,9 +146,9 @@ def test_worker_dispatches_recaptcha_job(monkeypatch):
     monkeypatch.setattr(runtime, "_browser", lambda: object())
     monkeypatch.setattr(
         "camoufox_service.worker.solve_recaptcha",
-        lambda browser, request: __import__("camoufox_service.models", fromlist=["TaskResult"]).TaskResult(
-            status="solved", token="recaptcha-token", elapsedMs=1
-        ),
+        lambda browser, request: __import__(
+            "camoufox_service.models", fromlist=["TaskResult"]
+        ).TaskResult(status="solved", token="recaptcha-token", elapsedMs=1),
         raising=False,
     )
 

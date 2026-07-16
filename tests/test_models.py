@@ -4,8 +4,8 @@ from pydantic import ValidationError
 from camoufox_service.config import Settings
 from camoufox_service.models import (
     ChallengeRequest,
-    SessionCreateRequest,
     RecaptchaV2Request,
+    SessionCreateRequest,
     TaskResult,
     TurnstileRequest,
 )

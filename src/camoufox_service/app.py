@@ -101,9 +101,13 @@ def create_app(
     async def challenge_solve(request: ChallengeRequest):
         return await service_supervisor.request("challenge.solve", request.model_dump(mode="json"))
 
-    @app.post("/v1/recaptcha/v2/solve", response_model=TaskResult, dependencies=[Depends(authorize)])
+    @app.post(
+        "/v1/recaptcha/v2/solve", response_model=TaskResult, dependencies=[Depends(authorize)]
+    )
     async def recaptcha_solve(request: RecaptchaV2Request):
-        return await service_supervisor.request("recaptcha.v2.solve", request.model_dump(mode="json"))
+        return await service_supervisor.request(
+            "recaptcha.v2.solve", request.model_dump(mode="json")
+        )
 
     @app.post("/v1/sessions", response_model=TaskResult, dependencies=[Depends(authorize)])
     async def create_session(request: SessionCreateRequest):
@@ -128,7 +132,11 @@ def create_app(
                 registry.delete(record.session_id)
         return {"sessions": [record.as_dict() for record in registry.list()]}
 
-    @app.post("/v1/sessions/{session_id}/request", response_model=TaskResult, dependencies=[Depends(authorize)])
+    @app.post(
+        "/v1/sessions/{session_id}/request",
+        response_model=TaskResult,
+        dependencies=[Depends(authorize)],
+    )
     async def session_request(session_id: str, request: SessionRequest):
         await expire_sessions()
         record = registry.get(session_id)

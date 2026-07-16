@@ -11,7 +11,6 @@ from collections.abc import Sequence
 
 import psutil
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -72,11 +71,15 @@ class WorkerProcess:
                     if future is None or future.done():
                         continue
                     if message.get("error"):
-                        future.set_exception(WorkerError(str(message["error"].get("message") or "worker error")))
+                        future.set_exception(
+                            WorkerError(str(message["error"].get("message") or "worker error"))
+                        )
                     else:
                         future.set_result(message.get("result") or {})
                 except (json.JSONDecodeError, TypeError) as exc:
-                    logger.warning("worker %s emitted invalid protocol output: %s", self.worker_id, exc)
+                    logger.warning(
+                        "worker %s emitted invalid protocol output: %s", self.worker_id, exc
+                    )
         finally:
             self._fail_pending(WorkerExited(f"worker {self.worker_id} exited"))
 
@@ -97,7 +100,9 @@ class WorkerProcess:
         request_id = uuid.uuid4().hex
         future = asyncio.get_running_loop().create_future()
         self.pending[request_id] = future
-        message = json.dumps({"id": request_id, "kind": kind, "payload": payload}, separators=(",", ":"))
+        message = json.dumps(
+            {"id": request_id, "kind": kind, "payload": payload}, separators=(",", ":")
+        )
         try:
             self.process.stdin.write((message + "\n").encode("utf-8"))
             await self.process.stdin.drain()
@@ -118,7 +123,11 @@ class WorkerProcess:
         try:
             root = psutil.Process(self.pid)
             processes = [root, *root.children(recursive=True)]
-            return sum(process.memory_info().rss for process in processes if process.is_running()) / 1024 / 1024
+            return (
+                sum(process.memory_info().rss for process in processes if process.is_running())
+                / 1024
+                / 1024
+            )
         except (psutil.Error, OSError):
             return 0.0
 
@@ -253,7 +262,11 @@ class WorkerSupervisor:
         if worker.sessions:
             return False
         age = time.monotonic() - worker.started_at
-        return worker.jobs >= self.max_jobs or age >= self.max_lifetime or worker.rss_mb() >= self.max_rss_mb
+        return (
+            worker.jobs >= self.max_jobs
+            or age >= self.max_lifetime
+            or worker.rss_mb() >= self.max_rss_mb
+        )
 
     async def request(
         self,
@@ -262,7 +275,9 @@ class WorkerSupervisor:
         timeout: float | None = None,
         worker_id: int | None = None,
     ) -> dict:
-        result, _ = await self.request_with_worker(kind, payload, timeout=timeout, worker_id=worker_id)
+        result, _ = await self.request_with_worker(
+            kind, payload, timeout=timeout, worker_id=worker_id
+        )
         return result
 
     async def request_with_worker(
@@ -292,7 +307,9 @@ class WorkerSupervisor:
                 except TimeoutError as exc:
                     self.failed_requests += 1
                     await self._replace(selected)
-                    raise WorkerTimeout(f"worker task exceeded {timeout or self.task_timeout} seconds") from exc
+                    raise WorkerTimeout(
+                        f"worker task exceeded {timeout or self.task_timeout} seconds"
+                    ) from exc
                 except WorkerError:
                     self.failed_requests += 1
                     await self._replace(selected)

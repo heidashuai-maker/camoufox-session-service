@@ -21,7 +21,7 @@ python -m venv .venv
 . .venv/bin/activate
 python -m pip install -e ".[test]"
 python -m camoufox fetch
-python -m uvicorn camoufox_service.app:app --host 0.0.0.0 --port 3000
+python -m camoufox_service
 ```
 
 On Windows, activate with `.venv\Scripts\activate`.
@@ -117,6 +117,7 @@ Copy `.env.example` to `.env`. Set `AUTH_TOKEN` to require `Authorization: Beare
 ## Testing
 
 ```bash
+python -m ruff check .
 python -m pytest -q
 ```
 

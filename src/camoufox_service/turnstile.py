@@ -12,13 +12,14 @@ from .browser import (
 )
 from .models import ErrorInfo, TaskResult, TurnstileRequest
 
-
 TURNSTILE_TEMPLATE = """<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><title>Turnstile</title></head>
 <body>
   <div id="turnstile-widget"></div>
-  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=renderWidget" defer></script>
+  <script
+    src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=renderWidget"
+    defer></script>
   <script>
     window.__turnstileToken = null;
     window.renderWidget = function () {

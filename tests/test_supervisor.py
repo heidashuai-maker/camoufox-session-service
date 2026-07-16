@@ -3,8 +3,8 @@ import textwrap
 
 import pytest
 
-from camoufox_service.supervisor import WorkerSupervisor, WorkerTimeout
 from camoufox_service.models import TaskResult
+from camoufox_service.supervisor import WorkerError, WorkerSupervisor, WorkerTimeout
 from camoufox_service.worker import BrowserRuntime
 
 
@@ -66,7 +66,7 @@ async def test_start_fails_when_worker_health_probe_fails(tmp_path):
         task_timeout=1,
     )
 
-    with pytest.raises(Exception):
+    with pytest.raises(WorkerError):
         await supervisor.start()
 
     assert supervisor.ready() is False

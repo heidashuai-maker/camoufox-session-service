@@ -25,4 +25,3 @@ def test_official_turnstile_dummy_key():
 
     assert result.status == "solved", result.model_dump()
     assert result.token
-
