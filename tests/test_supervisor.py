@@ -4,7 +4,12 @@ import textwrap
 import pytest
 
 from camoufox_service.models import TaskResult
-from camoufox_service.supervisor import WorkerError, WorkerSupervisor, WorkerTimeout
+from camoufox_service.supervisor import (
+    WorkerError,
+    WorkerProcess,
+    WorkerSupervisor,
+    WorkerTimeout,
+)
 from camoufox_service.worker import BrowserRuntime
 
 
@@ -125,3 +130,28 @@ def test_session_creation_seeds_browser_context_cookies():
     )
 
     assert runtime.browser.context.added_cookies[0]["name"] == "cf_clearance"
+
+
+@pytest.mark.asyncio
+async def test_stop_tolerates_process_exit_between_wait_and_kill(monkeypatch):
+    class RaceProcess:
+        pid = None
+        returncode = None
+
+        async def wait(self):
+            return 0
+
+        def kill(self):
+            raise ProcessLookupError
+
+    async def raise_timeout(awaitable, *, timeout):
+        awaitable.close()
+        raise TimeoutError
+
+    worker = WorkerProcess(0, ["fake"])
+    worker.process = RaceProcess()
+    monkeypatch.setattr("camoufox_service.supervisor.asyncio.wait_for", raise_timeout)
+
+    await worker.stop()
+
+    assert worker.process is None

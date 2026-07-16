@@ -156,7 +156,10 @@ class WorkerProcess:
             try:
                 await asyncio.wait_for(self.process.wait(), timeout=3)
             except TimeoutError:
-                self.process.kill()
+                try:
+                    self.process.kill()
+                except ProcessLookupError:
+                    pass
                 await self.process.wait()
         current = asyncio.current_task()
         tasks = []
