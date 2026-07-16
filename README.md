@@ -69,12 +69,32 @@ Possible outcomes include `solved`, `no_challenge`, `challenge_present`, `intera
 
 ### Persistent sessions
 
-Create a context:
+Create an empty context:
 
 ```bash
 curl -X POST http://127.0.0.1:3000/v1/sessions \
   -H "Content-Type: application/json" \
   -d '{"ttlSeconds":900}'
+```
+
+To reuse a solver result inside the service, pass its cookies back when creating the
+session and keep the same `userAgent` and proxy identity:
+
+```bash
+curl -X POST http://127.0.0.1:3000/v1/sessions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ttlSeconds": 900,
+    "userAgent": "USER_AGENT_FROM_SOLVER_RESULT",
+    "cookies": [{
+      "name": "cf_clearance",
+      "value": "COOKIE_VALUE_FROM_SOLVER_RESULT",
+      "domain": ".example.test",
+      "path": "/",
+      "secure": true,
+      "httpOnly": true
+    }]
+  }'
 ```
 
 Use the returned `sessionId`:
@@ -85,7 +105,10 @@ curl -X POST http://127.0.0.1:3000/v1/sessions/SESSION_ID/request \
   -d '{"method":"GET","url":"https://example.test","returnHtml":true}'
 ```
 
-Delete it with `DELETE /v1/sessions/SESSION_ID`. Cookies exported for direct HTTP reuse must stay paired with the returned User-Agent and the same proxy identity.
+Delete it with `DELETE /v1/sessions/SESSION_ID`. Cookies exported for direct HTTP
+reuse must stay paired with the returned User-Agent and the same proxy identity.
+If a session's browser worker restarts, that session is invalidated and the request
+returns HTTP 410 instead of silently using a fresh browser identity.
 
 ## Configuration
 

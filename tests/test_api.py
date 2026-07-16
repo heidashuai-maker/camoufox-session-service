@@ -8,6 +8,7 @@ class FakeSupervisor:
     def __init__(self):
         self.calls = []
         self.pids = [123]
+        self.generations = {0: 1}
 
     async def start(self):
         return None
@@ -25,6 +26,9 @@ class FakeSupervisor:
 
     def ready(self):
         return True
+
+    def generation(self, worker_id):
+        return self.generations[worker_id]
 
 
 def settings():
@@ -93,3 +97,20 @@ def test_expired_session_is_destroyed_on_maintenance_call():
         {"sessionId": session_id},
         0,
     )
+
+
+def test_session_is_invalidated_after_its_worker_restarts():
+    supervisor = FakeSupervisor()
+    app = create_app(settings=settings(), supervisor=supervisor)
+    with TestClient(app) as client:
+        created = client.post("/v1/sessions", json={})
+        session_id = created.json()["sessionId"]
+        supervisor.generations[0] += 1
+
+        response = client.post(
+            f"/v1/sessions/{session_id}/request",
+            json={"url": "https://example.test"},
+        )
+
+    assert response.status_code == 410
+    assert app.state.sessions.get(session_id) is None

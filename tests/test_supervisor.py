@@ -42,11 +42,13 @@ async def test_timeout_replaces_worker_and_next_request_succeeds(fake_worker_com
     )
     await supervisor.start()
     first_pid = supervisor.pids[0]
+    first_generation = supervisor.generation(0)
     try:
         with pytest.raises(WorkerTimeout):
             await supervisor.request("sleep", {"seconds": 1})
 
         assert supervisor.pids[0] != first_pid
+        assert supervisor.generation(0) > first_generation
         result = await supervisor.request("echo", {"value": 7}, timeout=1)
         assert result["echo"] == {"value": 7}
     finally:
@@ -75,3 +77,51 @@ def test_worker_escalates_browser_crash_to_supervisor():
 
     with pytest.raises(RuntimeError, match="browser process crashed"):
         runtime.serialize_result(TaskResult(status="browser_crashed", elapsedMs=1))
+
+
+def test_session_creation_seeds_browser_context_cookies():
+    class Page:
+        def evaluate(self, _):
+            return "Test Agent"
+
+        def close(self):
+            pass
+
+    class Context:
+        def __init__(self):
+            self.added_cookies = []
+
+        def add_cookies(self, cookies):
+            self.added_cookies.extend(cookies)
+
+        def new_page(self):
+            return Page()
+
+        def cookies(self):
+            return self.added_cookies
+
+    class Browser:
+        def __init__(self):
+            self.context = Context()
+
+        def new_context(self, **_):
+            return self.context
+
+    runtime = BrowserRuntime()
+    runtime.browser = Browser()
+
+    runtime.create_session(
+        {
+            "sessionId": "s1",
+            "cookies": [
+                {
+                    "name": "cf_clearance",
+                    "value": "token",
+                    "domain": ".example.test",
+                    "path": "/",
+                }
+            ],
+        }
+    )
+
+    assert runtime.browser.context.added_cookies[0]["name"] == "cf_clearance"

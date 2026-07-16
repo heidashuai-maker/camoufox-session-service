@@ -114,6 +114,7 @@ def create_app(
         result, worker_id = await service_supervisor.request_with_worker("session.create", payload)
         registry.create(
             worker_id,
+            worker_generation=service_supervisor.generation(worker_id),
             session_id=session_id,
             ttl_seconds=request.ttlSeconds,
         )
@@ -122,6 +123,9 @@ def create_app(
     @app.get("/v1/sessions", dependencies=[Depends(authorize)])
     async def list_sessions():
         await expire_sessions()
+        for record in registry.list():
+            if record.worker_generation != service_supervisor.generation(record.worker_id):
+                registry.delete(record.session_id)
         return {"sessions": [record.as_dict() for record in registry.list()]}
 
     @app.post("/v1/sessions/{session_id}/request", response_model=TaskResult, dependencies=[Depends(authorize)])
@@ -130,6 +134,9 @@ def create_app(
         record = registry.get(session_id)
         if not record:
             raise HTTPException(status_code=404, detail="Session not found")
+        if record.worker_generation != service_supervisor.generation(record.worker_id):
+            registry.delete(session_id)
+            raise HTTPException(status_code=410, detail="Session browser worker restarted")
         payload = request.model_dump(mode="json")
         payload["sessionId"] = session_id
         return await service_supervisor.request(
@@ -145,6 +152,8 @@ def create_app(
         record = registry.delete(session_id)
         if not record:
             raise HTTPException(status_code=404, detail="Session not found")
+        if record.worker_generation != service_supervisor.generation(record.worker_id):
+            raise HTTPException(status_code=410, detail="Session browser worker restarted")
         await service_supervisor.request(
             "session.destroy",
             {"sessionId": session_id},

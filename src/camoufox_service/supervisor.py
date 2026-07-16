@@ -182,6 +182,7 @@ class WorkerSupervisor:
         self.max_lifetime = max_lifetime
         self.max_rss_mb = max_rss_mb
         self._workers: dict[int, WorkerProcess] = {}
+        self._generations = {worker_id: 0 for worker_id in range(workers)}
         self._locks = {worker_id: asyncio.Lock() for worker_id in range(workers)}
         self._admission_lock = asyncio.Lock()
         self._admitted = 0
@@ -209,6 +210,7 @@ class WorkerSupervisor:
             await worker.stop()
             raise
         self._workers[worker_id] = worker
+        self._generations[worker_id] += 1
         return worker
 
     async def stop(self) -> None:
@@ -218,6 +220,9 @@ class WorkerSupervisor:
 
     def ready(self) -> bool:
         return len(self.pids) == self.worker_count
+
+    def generation(self, worker_id: int) -> int:
+        return self._generations[worker_id]
 
     async def _admit(self) -> None:
         async with self._admission_lock:

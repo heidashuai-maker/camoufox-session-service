@@ -10,6 +10,7 @@ from typing import Callable
 class SessionRecord:
     session_id: str
     worker_id: int
+    worker_generation: int
     created_at: float
     last_used_at: float
     expires_at: float
@@ -34,6 +35,7 @@ class SessionRegistry:
         self,
         worker_id: int,
         *,
+        worker_generation: int,
         session_id: str | None = None,
         ttl_seconds: int | None = None,
     ) -> SessionRecord:
@@ -41,6 +43,7 @@ class SessionRegistry:
         record = SessionRecord(
             session_id=session_id or uuid.uuid4().hex,
             worker_id=worker_id,
+            worker_generation=worker_generation,
             created_at=now,
             last_used_at=now,
             expires_at=now + (ttl_seconds or self.ttl_seconds),
@@ -71,4 +74,3 @@ class SessionRegistry:
 
     def list(self) -> list[SessionRecord]:
         return list(self._records.values())
-

@@ -67,9 +67,14 @@ class BrowserRuntime:
         return result.model_dump(mode="json")
 
     def create_session(self, payload: dict) -> dict:
-        request = SessionCreateRequest.model_validate(payload)
-        session_id = str(payload["sessionId"])
+        values = dict(payload)
+        session_id = str(values.pop("sessionId"))
+        request = SessionCreateRequest.model_validate(values)
         context = self._browser().new_context(**context_options(request))
+        if request.cookies:
+            context.add_cookies(
+                [cookie.model_dump(exclude_none=True) for cookie in request.cookies]
+            )
         page = context.new_page()
         try:
             user_agent = page_user_agent(page)

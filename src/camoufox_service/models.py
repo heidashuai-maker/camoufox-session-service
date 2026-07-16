@@ -88,6 +88,14 @@ class ChallengeRequest(BrowserOptions):
 
 class SessionCreateRequest(BrowserOptions):
     ttlSeconds: int | None = Field(default=None, ge=30, le=86_400)
+    cookies: list["Cookie"] = Field(default_factory=list, max_length=100)
+
+    @field_validator("cookies")
+    @classmethod
+    def require_cookie_domains(cls, cookies: list["Cookie"]) -> list["Cookie"]:
+        if any(not cookie.domain for cookie in cookies):
+            raise ValueError("session cookies require a domain")
+        return cookies
 
 
 class SessionRequest(StrictModel):

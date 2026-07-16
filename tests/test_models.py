@@ -4,6 +4,7 @@ from pydantic import ValidationError
 from camoufox_service.config import Settings
 from camoufox_service.models import (
     ChallengeRequest,
+    SessionCreateRequest,
     RecaptchaV2Request,
     TaskResult,
     TurnstileRequest,
@@ -51,6 +52,21 @@ def test_task_result_has_stable_envelope():
     assert payload["cookies"] == []
     assert payload["error"] is None
     assert payload["sessionId"] is None
+
+
+def test_session_accepts_cookies_returned_by_solver():
+    request = SessionCreateRequest(
+        cookies=[
+            {
+                "name": "cf_clearance",
+                "value": "token",
+                "domain": ".example.test",
+                "path": "/",
+            }
+        ]
+    )
+
+    assert request.cookies[0].name == "cf_clearance"
 
 
 def test_settings_read_worker_limits(monkeypatch):
