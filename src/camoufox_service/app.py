@@ -46,6 +46,18 @@ def create_app(
             await service_supervisor.stop()
 
     app = FastAPI(title="camoufox-session-service", version="0.1.0", lifespan=lifespan)
+    app.state.sessions = registry
+
+    async def expire_sessions() -> None:
+        for record in registry.expire():
+            try:
+                await service_supervisor.request(
+                    "session.destroy",
+                    {"sessionId": record.session_id},
+                    worker_id=record.worker_id,
+                )
+            except WorkerError:
+                pass
 
     def authorize(authorization: str | None = Header(default=None)) -> None:
         if not service_settings.auth_token:
@@ -95,6 +107,7 @@ def create_app(
 
     @app.post("/v1/sessions", response_model=TaskResult, dependencies=[Depends(authorize)])
     async def create_session(request: SessionCreateRequest):
+        await expire_sessions()
         session_id = uuid.uuid4().hex
         payload = request.model_dump(mode="json")
         payload["sessionId"] = session_id
@@ -108,10 +121,12 @@ def create_app(
 
     @app.get("/v1/sessions", dependencies=[Depends(authorize)])
     async def list_sessions():
+        await expire_sessions()
         return {"sessions": [record.as_dict() for record in registry.list()]}
 
     @app.post("/v1/sessions/{session_id}/request", response_model=TaskResult, dependencies=[Depends(authorize)])
     async def session_request(session_id: str, request: SessionRequest):
+        await expire_sessions()
         record = registry.get(session_id)
         if not record:
             raise HTTPException(status_code=404, detail="Session not found")
@@ -126,6 +141,7 @@ def create_app(
 
     @app.delete("/v1/sessions/{session_id}", status_code=204, dependencies=[Depends(authorize)])
     async def delete_session(session_id: str):
+        await expire_sessions()
         record = registry.delete(session_id)
         if not record:
             raise HTTPException(status_code=404, detail="Session not found")

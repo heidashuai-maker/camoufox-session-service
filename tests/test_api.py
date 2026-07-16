@@ -75,3 +75,21 @@ def test_session_lifecycle_keeps_worker_affinity():
     assert deleted.status_code == 204
     assert supervisor.calls[1][2] == 0
     assert supervisor.calls[2][2] == 0
+
+
+def test_expired_session_is_destroyed_on_maintenance_call():
+    supervisor = FakeSupervisor()
+    app = create_app(settings=settings(), supervisor=supervisor)
+    with TestClient(app) as client:
+        created = client.post("/v1/sessions", json={})
+        session_id = created.json()["sessionId"]
+        app.state.sessions.list()[0].expires_at = 0
+
+        response = client.get("/v1/sessions")
+
+    assert response.json() == {"sessions": []}
+    assert supervisor.calls[-1] == (
+        "session.destroy",
+        {"sessionId": session_id},
+        0,
+    )
