@@ -1,3 +1,5 @@
+"""音频下载、格式转换、语音识别与文本规范化。"""
+
 from __future__ import annotations
 
 import os
@@ -21,6 +23,8 @@ class AudioRecognitionError(AudioChallengeError):
 
 
 class AudioChallengeProcessor:
+    """复用浏览器身份下载音频，并完成 WAV 转换与语音识别。"""
+
     def __init__(
         self,
         *,
@@ -48,11 +52,15 @@ class AudioChallengeProcessor:
         language: str = "en-US",
         timeout: float | None = None,
     ) -> str | None:
+        """依次下载、转换和识别音频，无法识别时返回空结果。"""
+
         audio = self.download_audio(audio_url, timeout=timeout)
         wav = self.convert_mp3_to_wav(audio)
         return self.transcribe(wav, language=language) if wav else None
 
     def download_audio(self, url: str, *, timeout: float | None = None) -> bytes:
+        """依次尝试响应缓存、浏览器请求上下文和独立 HTTP Session。"""
+
         cached = self.audio_cache.get(url)
         if cached:
             return cached
@@ -87,6 +95,8 @@ class AudioChallengeProcessor:
 
     @staticmethod
     def convert_mp3_to_wav(mp3_bytes: bytes) -> bytes | None:
+        """把 MP3 规范化为单声道 16 kHz WAV。"""
+
         if not mp3_bytes or len(mp3_bytes) < 16:
             return None
         from pydub import AudioSegment, effects
@@ -103,6 +113,8 @@ class AudioChallengeProcessor:
 
     @classmethod
     def transcribe(cls, wav_bytes: bytes, *, language: str) -> str | None:
+        """调用语音识别服务，并返回规范化后的答案文本。"""
+
         import speech_recognition
 
         recognizer = speech_recognition.Recognizer()

@@ -1,3 +1,5 @@
+"""reCAPTCHA v2 复选框、Challenge Frame 与音频流程编排。"""
+
 from __future__ import annotations
 
 import html
@@ -71,6 +73,8 @@ def build_recaptcha_html(request: RecaptchaV2Request) -> str:
 
 
 class FrameState:
+    """集中查找 reCAPTCHA Frame，并读取复选框与音频界面状态。"""
+
     def __init__(self, page, timeout: float = 15):
         self.page = page
         self.timeout = timeout
@@ -208,6 +212,8 @@ class FrameState:
 
 
 class RecaptchaAudioSolver:
+    """编排复选框点击、音频切换、识别提交和 Token 等待。"""
+
     def __init__(self, page, timeout: float = 15, token_timeout: float = 25):
         self.page = page
         self.timeout = timeout
@@ -255,6 +261,8 @@ class RecaptchaAudioSolver:
         self.frames.click(frame.locator("#recaptcha-verify-button").first)
 
     def solve_recaptcha(self, processor, *, max_attempts: int = 3, **_) -> RecaptchaSolveResult:
+        """优先读取已有 Token，再按复选框、音频 Challenge 顺序求解。"""
+
         existing = self.token()
         if existing:
             return RecaptchaSolveResult(existing, 0)
@@ -312,6 +320,8 @@ class RecaptchaAudioSolver:
 
 
 class RecaptchaV2Solver:
+    """管理 reCAPTCHA v2 的浏览器上下文、网络拦截和资源清理。"""
+
     def __init__(
         self,
         browser,
@@ -339,6 +349,8 @@ class RecaptchaV2Solver:
     def _setup_network(
         page, request: RecaptchaV2Request, phase: dict, audio_cache: dict[str, bytes]
     ) -> None:
+        """缓存音频响应，并在目标 Origin 下提供最小组件页面。"""
+
         target = str(request.url).rstrip("/")
 
         def remember_audio(response):
@@ -372,6 +384,8 @@ class RecaptchaV2Solver:
         page.route("**/*", route_request)
 
     def solve(self, request: RecaptchaV2Request) -> TaskResult:
+        """准备 Session 页面和组件页面，执行音频求解并统一归类错误。"""
+
         started = time.monotonic()
         context = None
         processor = None
@@ -434,4 +448,6 @@ class RecaptchaV2Solver:
 
 
 def solve_recaptcha(browser, request: RecaptchaV2Request) -> TaskResult:
+    """使用默认依赖创建并执行 reCAPTCHA v2 求解器。"""
+
     return RecaptchaV2Solver(browser).solve(request)

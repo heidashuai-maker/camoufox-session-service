@@ -1,3 +1,5 @@
+"""Worker 子进程监管、队列准入、硬超时、替换与回收。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -31,6 +33,8 @@ class QueueFull(WorkerError):
 
 
 class WorkerProcess:
+    """管理单个 Worker 子进程及其 JSONL 请求、响应和资源统计。"""
+
     def __init__(self, worker_id: int, command: Sequence[str], cwd: str | None = None):
         self.worker_id = worker_id
         self.command = list(command)
@@ -48,6 +52,8 @@ class WorkerProcess:
         return self.process.pid if self.process and self.process.returncode is None else None
 
     async def start(self) -> None:
+        """启动独立进程组，并创建 stdout/stderr 后台读取任务。"""
+
         creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
         self.process = await asyncio.create_subprocess_exec(
             *self.command,
@@ -95,6 +101,8 @@ class WorkerProcess:
         self.pending.clear()
 
     async def request(self, kind: str, payload: dict) -> dict:
+        """发送带唯一 ID 的 JSONL 请求，并等待对应异步响应。"""
+
         if not self.process or self.process.returncode is not None or not self.process.stdin:
             raise WorkerExited(f"worker {self.worker_id} is not running")
         request_id = uuid.uuid4().hex
@@ -132,9 +140,12 @@ class WorkerProcess:
             return 0.0
 
     async def stop(self) -> None:
+        """终止 Worker 及浏览器后代进程，并收束所有后台任务。"""
+
         self._fail_pending(WorkerExited(f"worker {self.worker_id} stopped"))
         pid = self.pid
         if pid:
+            # 先处理完整进程树，避免只结束 Worker 后遗留 Camoufox 子进程。
             try:
                 root = psutil.Process(pid)
                 processes = [*root.children(recursive=True), root]
@@ -176,6 +187,8 @@ class WorkerProcess:
 
 
 class WorkerSupervisor:
+    """管理 Worker 池、队列容量、硬超时、代际和主动回收。"""
+
     def __init__(
         self,
         command: Sequence[str],
@@ -217,6 +230,8 @@ class WorkerSupervisor:
             await self._start_worker(worker_id)
 
     async def _start_worker(self, worker_id: int) -> WorkerProcess:
+        """启动并健康检查 Worker，成功后递增该槽位代际。"""
+
         worker = WorkerProcess(worker_id, self.command, self.cwd)
         await worker.start()
         try:
@@ -258,6 +273,8 @@ class WorkerSupervisor:
         return worker_id
 
     async def _replace(self, worker_id: int) -> WorkerProcess:
+        """完整停止旧进程，再为同一槽位创建新 Worker。"""
+
         old = self._workers.pop(worker_id, None)
         if old:
             await old.stop()
@@ -265,6 +282,8 @@ class WorkerSupervisor:
         return await self._start_worker(worker_id)
 
     def _should_recycle(self, worker: WorkerProcess) -> bool:
+        """无持久 Session 时，根据任务数、存活时间和 RSS 判断回收。"""
+
         if worker.sessions:
             return False
         age = time.monotonic() - worker.started_at
@@ -293,6 +312,9 @@ class WorkerSupervisor:
         timeout: float | None = None,
         worker_id: int | None = None,
     ) -> tuple[dict, int]:
+        """按 admission、Worker 锁、硬超时和进程替换顺序执行任务。"""
+
+        # admission 同时统计运行中和排队任务，先限流再选择 Worker。
         await self._admit()
         selected = self._select_worker_id() if worker_id is None else worker_id
         if selected not in self._locks:

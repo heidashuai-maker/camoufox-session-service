@@ -1,3 +1,5 @@
+"""整页 Cloudflare Challenge 证据检测与状态归类。"""
+
 from __future__ import annotations
 
 import time
@@ -15,12 +17,16 @@ from .models import ChallengeRequest, ErrorInfo, TaskResult
 
 @dataclass(frozen=True, slots=True)
 class ChallengeEvidence:
+    """描述页面是否出现 Challenge，以及是否仍需要人工交互。"""
+
     detected: bool
     vendor: str | None = None
     interactive: bool = False
 
 
 def detect_challenge(page) -> ChallengeEvidence:
+    """综合标题、HTML、当前 URL 和 Frame URL 判断 Challenge 状态。"""
+
     title = (page.title() or "").lower()
     body = (page.content() or "").lower()
     current_url = str(page.url or "").lower()
@@ -46,6 +52,8 @@ def detect_challenge(page) -> ChallengeEvidence:
 
 
 def solve_challenge(browser, request: ChallengeRequest) -> TaskResult:
+    """访问真实页面并等待 Challenge 消失，最终返回观察状态与会话信息。"""
+
     started = time.monotonic()
     context = None
     try:

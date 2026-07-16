@@ -1,3 +1,5 @@
+"""Worker 子进程内的 Camoufox 生命周期、Session 和任务派发。"""
+
 from __future__ import annotations
 
 import json
@@ -21,11 +23,15 @@ from .turnstile import solve_turnstile
 
 @dataclass
 class BrowserSession:
+    """保存持久 Browser Context 及其实际 User-Agent。"""
+
     context: object
     user_agent: str | None
 
 
 class BrowserRuntime:
+    """在单个 Worker 内独占 Camoufox，并管理全部持久 Session。"""
+
     def __init__(self):
         self.manager = None
         self.browser = None
@@ -33,6 +39,8 @@ class BrowserRuntime:
         self.settings = config.Settings.from_env()
 
     def open(self) -> None:
+        """按需启动 Camoufox；同一 Worker 的后续任务复用该实例。"""
+
         if self.browser is not None:
             return
         from camoufox.sync_api import Camoufox
@@ -45,6 +53,8 @@ class BrowserRuntime:
         self.browser = self.manager.__enter__()
 
     def close(self) -> None:
+        """关闭全部 Session Context，再退出 Camoufox 管理器。"""
+
         for session in self.sessions.values():
             try:
                 session.context.close()
@@ -63,10 +73,13 @@ class BrowserRuntime:
     @staticmethod
     def serialize_result(result: TaskResult) -> dict:
         if result.status == "browser_crashed":
+            # 浏览器断连必须升级为 Worker 协议错误，才能触发 Supervisor 替换进程。
             raise RuntimeError("browser process crashed")
         return result.model_dump(mode="json")
 
     def create_session(self, payload: dict) -> dict:
+        """创建持久 Context，写入 Cookie，并记录浏览器实际 User-Agent。"""
+
         values = dict(payload)
         session_id = str(values.pop("sessionId"))
         request = SessionCreateRequest.model_validate(values)
@@ -90,6 +103,8 @@ class BrowserRuntime:
         ).model_dump(mode="json")
 
     def session_request(self, payload: dict) -> dict:
+        """使用 Session 的 Browser Context 请求 API，保持 Cookie 与代理身份。"""
+
         session_id = str(payload.pop("sessionId"))
         request = SessionRequest.model_validate(payload)
         session = self.sessions.get(session_id)
@@ -121,6 +136,8 @@ class BrowserRuntime:
         return {"status": "solved", "sessionId": session_id, "elapsedMs": 0}
 
     def handle(self, kind: str, payload: dict) -> dict:
+        """校验任务类型，并派发到求解器或 Session 操作。"""
+
         if kind == "health":
             browser = self._browser()
             connected = not hasattr(browser, "is_connected") or browser.is_connected()
@@ -153,6 +170,8 @@ class BrowserRuntime:
 
 
 def main() -> None:
+    """运行 JSONL Worker 协议循环，并保证退出时关闭浏览器。"""
+
     runtime = BrowserRuntime()
     try:
         for line in sys.stdin:

@@ -1,3 +1,5 @@
+"""Turnstile 最小组件和真实页面两种求解策略。"""
+
 from __future__ import annotations
 
 import json
@@ -48,6 +50,8 @@ TOKEN_SCRIPT = """() => window.__turnstileToken ||
 
 
 def build_turnstile_html(request: TurnstileRequest) -> str:
+    """根据类型化 Widget 参数生成最小 Turnstile 页面。"""
+
     config = {
         "sitekey": request.siteKey,
         "action": request.action,
@@ -64,12 +68,15 @@ def build_turnstile_html(request: TurnstileRequest) -> str:
 
 
 def _install_minimal_route(page, request: TurnstileRequest) -> None:
+    """在目标 URL 的 Origin 下用本地 HTML 替换顶层文档。"""
+
     target = str(request.url).rstrip("/")
     html = build_turnstile_html(request)
 
     def route_request(route) -> None:
         current = route.request.url.rstrip("/")
         if current == target and route.request.resource_type == "document":
+            # 只替换顶层文档，第三方 Turnstile 脚本仍按正常网络链路加载。
             route.fulfill(status=200, content_type="text/html; charset=utf-8", body=html)
             return
         route.continue_()
@@ -78,6 +85,8 @@ def _install_minimal_route(page, request: TurnstileRequest) -> None:
 
 
 def solve_turnstile(browser, request: TurnstileRequest) -> TaskResult:
+    """加载 Widget 并等待 Token；minimal 保留 Origin，page 使用真实页面组件。"""
+
     started = time.monotonic()
     context = None
     try:
