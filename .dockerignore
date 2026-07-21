@@ -4,8 +4,10 @@
 .tmp
 .pytest_cache
 .pytest-*
+.ruff_cache
 artifacts
 build
 dist
+docs
 __pycache__
 *.pyc

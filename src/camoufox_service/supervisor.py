@@ -160,7 +160,7 @@ class WorkerProcess:
                         process.kill()
                     except psutil.Error:
                         pass
-            except psutil.Error:
+            except (psutil.Error, OSError):
                 if self.process and self.process.returncode is None:
                     self.process.kill()
         if self.process:

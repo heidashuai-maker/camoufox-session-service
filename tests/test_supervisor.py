@@ -155,3 +155,40 @@ async def test_stop_tolerates_process_exit_between_wait_and_kill(monkeypatch):
     await worker.stop()
 
     assert worker.process is None
+
+
+@pytest.mark.asyncio
+async def test_stop_falls_back_when_psutil_wait_procs_raises_oserror(monkeypatch):
+    class AsyncProcess:
+        pid = 43210
+        returncode = None
+
+        def __init__(self):
+            self.killed = False
+
+        async def wait(self):
+            return 0
+
+        def kill(self):
+            self.killed = True
+
+    class PsutilProcess:
+        def children(self, recursive):
+            return []
+
+        def terminate(self):
+            pass
+
+    process = AsyncProcess()
+    worker = WorkerProcess(0, ["fake"])
+    worker.process = process
+    monkeypatch.setattr("camoufox_service.supervisor.psutil.Process", lambda _: PsutilProcess())
+    monkeypatch.setattr(
+        "camoufox_service.supervisor.psutil.wait_procs",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError(22, "Invalid argument")),
+    )
+
+    await worker.stop()
+
+    assert process.killed is True
+    assert worker.process is None

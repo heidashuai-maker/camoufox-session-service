@@ -21,11 +21,14 @@ from .models import (
 from .sessions import SessionRegistry
 from .supervisor import QueueFull, WorkerError, WorkerSupervisor, WorkerTimeout
 
+_CHALLENGE_RESULT_GRACE_SECONDS = 10
+
 
 def create_app(
     *,
     settings: Settings | None = None,
     supervisor: WorkerSupervisor | None = None,
+    challenge_supervisor: WorkerSupervisor | None = None,
 ) -> FastAPI:
     """组装服务依赖、生命周期、异常映射和所有 HTTP 路由。"""
 
@@ -39,13 +42,26 @@ def create_app(
         max_lifetime=service_settings.max_worker_lifetime_seconds,
         max_rss_mb=service_settings.max_worker_rss_mb,
     )
+    service_challenge_supervisor = challenge_supervisor or WorkerSupervisor(
+        [sys.executable, "-u", "-m", "camoufox_service.challenge_worker"],
+        workers=service_settings.challenge_workers,
+        queue_size=service_settings.challenge_queue_size,
+        task_timeout=service_settings.challenge_task_timeout_seconds,
+        max_jobs=service_settings.challenge_max_jobs_per_worker,
+        max_lifetime=service_settings.challenge_max_worker_lifetime_seconds,
+        max_rss_mb=service_settings.challenge_max_worker_rss_mb,
+    )
     registry = SessionRegistry(service_settings.session_ttl_seconds)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         await service_supervisor.start()
         try:
-            yield
+            await service_challenge_supervisor.start()
+            try:
+                yield
+            finally:
+                await service_challenge_supervisor.stop()
         finally:
             await service_supervisor.stop()
 
@@ -90,14 +106,29 @@ def create_app(
 
     @app.get("/health/ready")
     async def ready():
-        if not service_supervisor.ready():
+        if not service_supervisor.ready() or not service_challenge_supervisor.ready():
             return JSONResponse(status_code=503, content={"status": "not_ready"})
-        return {"status": "ready", "workers": service_supervisor.pids}
+        return {
+            "status": "ready",
+            "workers": {
+                "camoufox": service_supervisor.pids,
+                "challenge": service_challenge_supervisor.pids,
+            },
+        }
 
     @app.get("/metrics", dependencies=[Depends(authorize)])
     async def metrics():
-        values = service_supervisor.metrics() if hasattr(service_supervisor, "metrics") else {}
-        return {**values, "sessions": len(registry.list())}
+        camoufox = service_supervisor.metrics() if hasattr(service_supervisor, "metrics") else {}
+        challenge = (
+            service_challenge_supervisor.metrics()
+            if hasattr(service_challenge_supervisor, "metrics")
+            else {}
+        )
+        return {
+            "camoufox": camoufox,
+            "challenge": challenge,
+            "sessions": len(registry.list()),
+        }
 
     @app.post("/v1/turnstile/solve", response_model=TaskResult, dependencies=[Depends(authorize)])
     async def turnstile_solve(request: TurnstileRequest):
@@ -105,7 +136,11 @@ def create_app(
 
     @app.post("/v1/challenge/solve", response_model=TaskResult, dependencies=[Depends(authorize)])
     async def challenge_solve(request: ChallengeRequest):
-        return await service_supervisor.request("challenge.solve", request.model_dump(mode="json"))
+        return await service_challenge_supervisor.request(
+            "challenge.solve",
+            request.model_dump(mode="json"),
+            timeout=request.timeoutMs / 1000 + _CHALLENGE_RESULT_GRACE_SECONDS,
+        )
 
     @app.post(
         "/v1/recaptcha/v2/solve", response_model=TaskResult, dependencies=[Depends(authorize)]

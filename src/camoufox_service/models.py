@@ -92,7 +92,6 @@ class TurnstileRequest(BrowserOptions):
 
 class ChallengeRequest(BrowserOptions):
     url: HttpUrl
-    waitSeconds: int = Field(default=30, ge=1, le=180)
     returnHtml: bool = True
 
 
@@ -139,8 +138,6 @@ class ErrorInfo(StrictModel):
 Outcome = Literal[
     "solved",
     "no_challenge",
-    "challenge_present",
-    "interactive_required",
     "timeout",
     "browser_crashed",
     "failed",

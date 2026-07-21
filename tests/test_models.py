@@ -30,6 +30,11 @@ def test_requests_reject_unknown_fields():
         ChallengeRequest(url="https://example.test", legacyMode="waf-session")
 
 
+def test_challenge_rejects_removed_wait_only_option():
+    with pytest.raises(ValidationError, match="waitSeconds"):
+        ChallengeRequest(url="https://example.test", waitSeconds=30)
+
+
 def test_proxy_string_is_normalized():
     request = RecaptchaV2Request(
         url="https://example.test",

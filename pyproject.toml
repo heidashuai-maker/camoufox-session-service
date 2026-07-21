@@ -12,6 +12,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 dependencies = [
     "camoufox[geoip]>=0.4.11,<0.5",
+    "DrissionPage==4.1.0.0b14",
     "fastapi>=0.115,<0.116",
     "psutil>=6,<8",
     "pydantic>=2.9,<3",

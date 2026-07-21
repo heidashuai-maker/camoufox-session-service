@@ -8,9 +8,7 @@ from dataclasses import dataclass
 
 from . import config
 from .browser import context_options, cookies_from_context, page_user_agent
-from .challenge import solve_challenge
 from .models import (
-    ChallengeRequest,
     RecaptchaV2Request,
     SessionCreateRequest,
     SessionRequest,
@@ -151,10 +149,6 @@ class BrowserRuntime:
         if kind == "turnstile.solve":
             return self.serialize_result(
                 solve_turnstile(self._browser(), TurnstileRequest.model_validate(payload))
-            )
-        if kind == "challenge.solve":
-            return self.serialize_result(
-                solve_challenge(self._browser(), ChallengeRequest.model_validate(payload))
             )
         if kind == "recaptcha.v2.solve":
             return self.serialize_result(

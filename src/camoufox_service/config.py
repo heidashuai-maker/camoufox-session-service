@@ -50,6 +50,12 @@ class Settings:
     max_worker_lifetime_seconds: int
     max_worker_rss_mb: int
     headless: bool | str
+    challenge_workers: int = 1
+    challenge_queue_size: int = 2
+    challenge_task_timeout_seconds: int = 180
+    challenge_max_jobs_per_worker: int = 10
+    challenge_max_worker_lifetime_seconds: int = 900
+    challenge_max_worker_rss_mb: int = 2048
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -67,4 +73,12 @@ class Settings:
             max_worker_lifetime_seconds=_integer("CAMOUFOX_MAX_WORKER_LIFETIME_SECONDS", 1800),
             max_worker_rss_mb=_integer("CAMOUFOX_MAX_WORKER_RSS_MB", 1536),
             headless=_headless("CAMOUFOX_HEADLESS", True),
+            challenge_workers=_integer("CHALLENGE_WORKERS", 1),
+            challenge_queue_size=_integer("CHALLENGE_QUEUE_SIZE", 2),
+            challenge_task_timeout_seconds=_integer("CHALLENGE_TASK_TIMEOUT_SECONDS", 180),
+            challenge_max_jobs_per_worker=_integer("CHALLENGE_MAX_JOBS_PER_WORKER", 10),
+            challenge_max_worker_lifetime_seconds=_integer(
+                "CHALLENGE_MAX_WORKER_LIFETIME_SECONDS", 900
+            ),
+            challenge_max_worker_rss_mb=_integer("CHALLENGE_MAX_WORKER_RSS_MB", 2048),
         )

@@ -1,12 +1,20 @@
 FROM python:3.11-slim-bookworm
 
+ARG PIP_INDEX_URL
+ARG PIP_TRUSTED_HOST
+ARG APT_REPOSITORY=http://deb.debian.org
+
 ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_DEFAULT_TIMEOUT=120 \
-    PIP_RETRIES=5
+    PIP_RETRIES=5 \
+    CHROMIUM_PATH=/usr/bin/chromium
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN sed -i "s|http://deb.debian.org|${APT_REPOSITORY}|g" \
+        /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
+    chromium \
     ffmpeg \
     fonts-liberation \
     fonts-noto-color-emoji \
@@ -34,6 +42,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxt6 \
     libxtst6 \
     procps \
+    tini \
+    xauth \
     xvfb \
     && rm -rf /var/lib/apt/lists/*
 
@@ -54,4 +64,5 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD python -c "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.getenv('PORT', '3000') + '/health/live', timeout=3)"
 
-CMD ["python", "-m", "camoufox_service"]
+ENTRYPOINT ["tini", "--"]
+CMD ["xvfb-run", "-a", "--server-args=-screen 0 1920x1080x24", "python", "-m", "camoufox_service"]

@@ -7,6 +7,7 @@ from camoufox_service.config import Settings
 class FakeSupervisor:
     def __init__(self):
         self.calls = []
+        self.timeouts = []
         self.pids = [123]
         self.generations = {0: 1}
 
@@ -18,6 +19,7 @@ class FakeSupervisor:
 
     async def request(self, kind, payload, timeout=None, worker_id=None):
         self.calls.append((kind, payload, worker_id))
+        self.timeouts.append(timeout)
         return {"status": "solved", "token": "dummy", "elapsedMs": 1}
 
     async def request_with_worker(self, kind, payload, timeout=None):
@@ -49,7 +51,13 @@ def settings():
 
 def test_turnstile_route_dispatches_typed_job():
     supervisor = FakeSupervisor()
-    with TestClient(create_app(settings=settings(), supervisor=supervisor)) as client:
+    with TestClient(
+        create_app(
+            settings=settings(),
+            supervisor=supervisor,
+            challenge_supervisor=FakeSupervisor(),
+        )
+    ) as client:
         response = client.post(
             "/v1/turnstile/solve",
             json={
@@ -64,9 +72,36 @@ def test_turnstile_route_dispatches_typed_job():
     assert supervisor.calls[0][0] == "turnstile.solve"
 
 
+def test_challenge_route_uses_dedicated_supervisor():
+    camoufox_supervisor = FakeSupervisor()
+    challenge_supervisor = FakeSupervisor()
+    with TestClient(
+        create_app(
+            settings=settings(),
+            supervisor=camoufox_supervisor,
+            challenge_supervisor=challenge_supervisor,
+        )
+    ) as client:
+        response = client.post(
+            "/v1/challenge/solve",
+            json={"url": "https://example.test", "timeoutMs": 45_000},
+        )
+
+    assert response.status_code == 200
+    assert camoufox_supervisor.calls == []
+    assert challenge_supervisor.calls[0][0] == "challenge.solve"
+    assert challenge_supervisor.timeouts == [55.0]
+
+
 def test_session_lifecycle_keeps_worker_affinity():
     supervisor = FakeSupervisor()
-    with TestClient(create_app(settings=settings(), supervisor=supervisor)) as client:
+    with TestClient(
+        create_app(
+            settings=settings(),
+            supervisor=supervisor,
+            challenge_supervisor=FakeSupervisor(),
+        )
+    ) as client:
         created = client.post("/v1/sessions", json={})
         session_id = created.json()["sessionId"]
         requested = client.post(
@@ -83,7 +118,11 @@ def test_session_lifecycle_keeps_worker_affinity():
 
 def test_expired_session_is_destroyed_on_maintenance_call():
     supervisor = FakeSupervisor()
-    app = create_app(settings=settings(), supervisor=supervisor)
+    app = create_app(
+        settings=settings(),
+        supervisor=supervisor,
+        challenge_supervisor=FakeSupervisor(),
+    )
     with TestClient(app) as client:
         created = client.post("/v1/sessions", json={})
         session_id = created.json()["sessionId"]
@@ -101,7 +140,11 @@ def test_expired_session_is_destroyed_on_maintenance_call():
 
 def test_session_is_invalidated_after_its_worker_restarts():
     supervisor = FakeSupervisor()
-    app = create_app(settings=settings(), supervisor=supervisor)
+    app = create_app(
+        settings=settings(),
+        supervisor=supervisor,
+        challenge_supervisor=FakeSupervisor(),
+    )
     with TestClient(app) as client:
         created = client.post("/v1/sessions", json={})
         session_id = created.json()["sessionId"]

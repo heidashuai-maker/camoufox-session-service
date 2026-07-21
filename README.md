@@ -1,21 +1,22 @@
 # Camoufox Session Service
 
-一个独立的 Python 浏览器任务服务，通过精简的 HTTP API 调度 Camoufox。项目面向需要浏览器渲染、CAPTCHA 组件加载、页面 Challenge 状态检测以及浏览器 Session 复用的场景。
+一个独立的 Python 浏览器任务服务，通过精简的 HTTP API 调度 Camoufox 与隔离的 Chromium Challenge Worker。项目面向需要浏览器渲染、CAPTCHA 组件加载、Cloudflare Managed Challenge 处理以及浏览器 Session 复用的场景。
 
 ## 功能范围
 
 - reCAPTCHA v2 复选框与音频 Challenge。
 - Turnstile 最小组件和真实页面两种加载策略。
-- 整页 Challenge 检测、页面状态归类与 Session 信息导出。
+- 独立 DrissionPage/Chromium Worker 复用长期浏览器，并用任务级 Context 处理整页 Cloudflare Managed Challenge。
 - 持久浏览器上下文，以及基于同一 Session 的后续请求。
 - 有界任务队列、硬超时、进程树替换、Worker 回收与运行指标。
 
-本项目不依赖历史 `turnstile-token-service`、Puppeteer、Selenium 或其他同级仓库。调用方不需要维护 Node.js 项目；底层 Playwright Python 包仍会携带自身的驱动运行时。
+本项目不依赖历史 `turnstile-token-service`、Puppeteer、Selenium、FlareSolverr 或其他同级仓库。组件任务和持久 Session 使用 Camoufox；整页 Challenge 使用独立的 DrissionPage/Chromium Worker，两个浏览器后端不共享生命周期。
 
 ## 环境要求
 
 - Python 3.11+
 - Camoufox 浏览器二进制
+- Chromium 与可用的图形显示；Docker 镜像使用 Xvfb
 - `ffmpeg` 和 `ffprobe`，用于 reCAPTCHA 音频格式转换
 
 ## 本地运行
@@ -44,7 +45,7 @@ Windows 激活虚拟环境：
 | --- | --- | --- |
 | `POST` | `/v1/turnstile/solve` | 加载 Turnstile 最小组件或真实页面组件 |
 | `POST` | `/v1/recaptcha/v2/solve` | 处理 reCAPTCHA v2 复选框与音频 Challenge |
-| `POST` | `/v1/challenge/solve` | 检测整页 Challenge 并导出观察结果 |
+| `POST` | `/v1/challenge/solve` | 处理整页 Cloudflare Managed Challenge 并导出浏览器身份 |
 | `POST` | `/v1/sessions` | 创建持久浏览器 Session |
 | `GET` | `/v1/sessions` | 查看当前 Session |
 | `POST` | `/v1/sessions/{sessionId}/request` | 在指定 Session 内发送请求 |
@@ -84,10 +85,17 @@ curl -X POST http://127.0.0.1:3000/v1/recaptcha/v2/solve \
 ```bash
 curl -X POST http://127.0.0.1:3000/v1/challenge/solve \
   -H "Content-Type: application/json" \
-  -d '{"url":"https://authorized.example/","waitSeconds":30,"returnHtml":true}'
+  -d '{
+    "url":"https://authorized.example/",
+    "proxy":"socks5h://proxy.example:8501",
+    "timeoutMs":120000,
+    "returnHtml":true
+  }'
 ```
 
-可能返回 `solved`、`no_challenge`、`challenge_present`、`interactive_required`、`timeout` 或 `failed`。该接口报告浏览器实际观察到的状态，不承诺通过所有 Cloudflare Managed Challenge。
+该接口由独立的 DrissionPage/Chromium Worker 执行，可能返回 `solved`、`no_challenge`、`timeout`、`browser_crashed` 或 `failed`。每个 Worker 延迟启动并复用一个 Chromium；每个任务创建独立 Browser Context，可分别指定无认证 HTTP、HTTPS 或 SOCKS 代理。任务结束后会显式销毁 Context，不会把 Cookie、缓存和存储带入下一个任务；如果 Context 销毁失败，则关闭当前 Chromium 并由下一个任务延迟重建。
+
+成功结果包含实际 User-Agent 和 Cookie；复用 `cf_clearance` 时必须保持相同出口 IP、代理及 User-Agent。该接口提高已知 Managed Challenge 的通过能力，但不承诺固定通过率。
 
 ### 持久 Session
 
@@ -151,6 +159,13 @@ Authorization: Bearer <token>
 | `CAMOUFOX_MAX_WORKER_LIFETIME_SECONDS` | `1800` | Worker 最大生存时间 |
 | `CAMOUFOX_MAX_WORKER_RSS_MB` | `1536` | Worker RSS 回收阈值 |
 | `CAMOUFOX_HEADLESS` | `true` | `true`、`false` 或 `virtual` |
+| `CHALLENGE_WORKERS` | `1` | DrissionPage Challenge Worker 数量 |
+| `CHALLENGE_QUEUE_SIZE` | `2` | Challenge 等待队列容量 |
+| `CHALLENGE_TASK_TIMEOUT_SECONDS` | `180` | Challenge Supervisor 默认硬超时 |
+| `CHALLENGE_MAX_JOBS_PER_WORKER` | `10` | Challenge Worker 最大任务数 |
+| `CHALLENGE_MAX_WORKER_LIFETIME_SECONDS` | `900` | Challenge Worker 最大生存时间 |
+| `CHALLENGE_MAX_WORKER_RSS_MB` | `2048` | Challenge Worker RSS 回收阈值 |
+| `CHROMIUM_PATH` | `/usr/bin/chromium` | Chromium 可执行文件路径 |
 
 ## 测试
 
@@ -176,12 +191,15 @@ docker compose up -d
 curl http://127.0.0.1:3000/health/ready
 ```
 
-镜像不包含 Chromium 运行时。Compose 启用最小 `init` 进程回收浏览器后代进程。每个 Worker 子进程独占 Camoufox 实例；任务超过硬超时后，Supervisor 会终止完整进程树，创建替代 Worker，再让该槽位接收新任务。
+镜像同时包含 Camoufox、Chromium、Xvfb 和 `tini`；即使不通过 Compose 启动，也会由最小 init 进程转发信号并回收浏览器后代进程。每个 Camoufox Worker 独占一个长期浏览器实例；每个 Challenge Worker 也延迟启动并复用一个 Chromium，但为每个任务创建和销毁独立 Browser Context。任务超过硬超时后，Supervisor 会终止完整进程树并创建替代 Worker。
+
+当前固定使用已通过目标站点验证的 `DrissionPage 4.1.0.0b14`，避免自动升级改变浏览器控制行为。该版本的包元数据声明为 BSD License；升级依赖前应重新检查许可证和真实站点回归结果。
 
 ## 能力边界
 
 - Turnstile Token 通常短期、单次有效，仍需由站点服务端执行验证。
 - 获取普通 Session Cookie 或 `__cf_bm` 不等于取得有效 `cf_clearance`。
-- Managed Challenge 是否通过取决于站点策略、网络信誉、浏览器身份和交互要求，本项目不提供通过率保证。
+- Managed Challenge 是否通过取决于站点策略、网络信誉、浏览器身份和交互要求；DrissionPage 后端不等同于稳定或百分之百通过。
+- Challenge 后端暂不支持带用户名和密码的代理；无认证 HTTP、HTTPS、SOCKS 代理沿用结构化 `proxy` 模型。
 - reCAPTCHA 音频识别依赖外部音频工具和语音识别服务，可能受到语言、速率限制和网络质量影响。
 - 请只对自有系统或已明确授权的目标使用本服务。
