@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.responses import JSONResponse
 
+from . import __version__
 from .config import Settings
 from .models import (
     ChallengeRequest,
@@ -65,7 +66,7 @@ def create_app(
         finally:
             await service_supervisor.stop()
 
-    app = FastAPI(title="camoufox-session-service", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="camoufox-session-service", version=__version__, lifespan=lifespan)
     app.state.sessions = registry
 
     async def expire_sessions() -> None:

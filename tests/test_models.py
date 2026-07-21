@@ -4,8 +4,10 @@ from pydantic import ValidationError
 from camoufox_service.config import Settings
 from camoufox_service.models import (
     ChallengeRequest,
+    ProxyConfig,
     RecaptchaV2Request,
     SessionCreateRequest,
+    SessionRequest,
     TaskResult,
     TurnstileRequest,
 )
@@ -48,6 +50,33 @@ def test_proxy_string_is_normalized():
     assert request.proxy.port == 8500
     assert request.proxy.username == "user"
     assert request.proxy.password == "pass"
+
+
+def test_proxy_builds_requests_url_with_remote_dns_and_escaped_auth():
+    proxy = ProxyConfig(
+        protocol="socks5",
+        host="127.0.0.1",
+        port=8501,
+        username="user@example.test",
+        password="p@ss word",
+    )
+
+    assert proxy.requests_url() == ("socks5h://user%40example.test:p%40ss%20word@127.0.0.1:8501")
+
+
+def test_removed_request_fields_are_rejected():
+    with pytest.raises(ValidationError, match="submitUrl"):
+        RecaptchaV2Request(
+            url="https://example.test",
+            siteKey="key",
+            submitUrl="https://example.test/submit",
+        )
+
+    with pytest.raises(ValidationError, match="waitUntil"):
+        SessionRequest(
+            url="https://example.test",
+            waitUntil="networkidle",
+        )
 
 
 def test_task_result_has_stable_envelope():

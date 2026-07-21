@@ -6,7 +6,7 @@ import html
 import random
 import time
 from dataclasses import dataclass
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit
 
 from .browser import (
     context_options,
@@ -34,13 +34,6 @@ class RecaptchaRateLimited(RecaptchaError):
 class RecaptchaSolveResult:
     token: str
     attempts: int
-
-
-def redact_url(value: str) -> str:
-    parsed = urlsplit(str(value or ""))
-    if not parsed.scheme or not parsed.netloc:
-        return str(value or "")
-    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
 
 
 def choose_fresh_audio_url(current: str, previous: str | None) -> str | None:
@@ -78,10 +71,6 @@ class FrameState:
     def __init__(self, page, timeout: float = 15):
         self.page = page
         self.timeout = timeout
-
-    @staticmethod
-    def _milliseconds(seconds: float) -> int:
-        return int(seconds * 1000)
 
     def _find_frame(self, marker: str, selectors: tuple[str, ...], timeout: float | None = None):
         deadline = time.monotonic() + (timeout or self.timeout)
@@ -260,7 +249,7 @@ class RecaptchaAudioSolver:
         self.page.keyboard.type(text.lower(), delay=random.randint(35, 90))
         self.frames.click(frame.locator("#recaptcha-verify-button").first)
 
-    def solve_recaptcha(self, processor, *, max_attempts: int = 3, **_) -> RecaptchaSolveResult:
+    def solve_recaptcha(self, processor, *, max_attempts: int = 3) -> RecaptchaSolveResult:
         """优先读取已有 Token，再按复选框、音频 Challenge 顺序求解。"""
 
         existing = self.token()
@@ -404,12 +393,11 @@ class RecaptchaV2Solver:
                 user_agent=user_agent or "Mozilla/5.0",
                 audio_cache=audio_cache,
                 page=page,
+                proxy=request.proxy,
             )
             solved = self.audio_solver_factory(page, timeout=15, token_timeout=25).solve_recaptcha(
                 processor,
                 max_attempts=request.maxAudioAttempts,
-                wait=True,
-                wait_timeout=35,
             )
             if len(solved.token) < 10:
                 raise RecaptchaError("reCAPTCHA returned an invalid token")

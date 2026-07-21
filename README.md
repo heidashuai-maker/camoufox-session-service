@@ -175,13 +175,14 @@ python -m ruff format --check .
 python -m pytest -q
 ```
 
-默认测试可重复执行，不访问受保护站点。可选浏览器集成测试使用 Cloudflare 官方 Dummy Sitekey：
+默认测试可重复执行，不访问受保护站点。两个可选浏览器集成测试分别验证 Camoufox Widget 链路和 DrissionPage Context 隔离链路：
 
 ```bash
 RUN_BROWSER_TESTS=1 python -m pytest tests/test_browser_integration.py -q
+RUN_CHALLENGE_BROWSER_TESTS=1 python -m pytest tests/test_challenge_browser_integration.py -q
 ```
 
-Dummy Key 只验证浏览器启动、文档拦截、Widget 渲染、回调捕获和资源清理，不衡量真实站点通过率。真实验收测试必须在自有站点或明确授权的目标上单独执行。
+第一个测试使用 Cloudflare 官方 Dummy Sitekey，只验证浏览器启动、文档拦截、Widget 渲染、回调捕获和资源清理；第二个测试使用本地 Challenge Fixture，验证长期 Chromium 下创建、销毁任务 Context 的行为。两者都不衡量真实站点通过率。真实验收测试必须在自有站点或明确授权的目标上单独执行。
 
 ## Docker
 
@@ -192,6 +193,8 @@ curl http://127.0.0.1:3000/health/ready
 ```
 
 镜像同时包含 Camoufox、Chromium、Xvfb 和 `tini`；即使不通过 Compose 启动，也会由最小 init 进程转发信号并回收浏览器后代进程。每个 Camoufox Worker 独占一个长期浏览器实例；每个 Challenge Worker 也延迟启动并复用一个 Chromium，但为每个任务创建和销毁独立 Browser Context。任务超过硬超时后，Supervisor 会终止完整进程树并创建替代 Worker。
+
+Compose 的 `4g` 是容器内存上限，不是预分配内存。两个 `*_MAX_WORKER_RSS_MB` 是单个 Worker 的主动回收阈值；增加 Worker 数量时，应同时按实际峰值提高容器内存上限，避免容器先于 Worker 回收机制触发 OOM。
 
 当前固定使用已通过目标站点验证的 `DrissionPage 4.1.0.0b14`，避免自动升级改变浏览器控制行为。该版本的包元数据声明为 BSD License；升级依赖前应重新检查许可证和真实站点回归结果。
 

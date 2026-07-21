@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Literal
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
@@ -44,6 +44,18 @@ class ProxyConfig(StrictModel):
     def server(self) -> str:
         return f"{self.protocol}://{self.host}:{self.port}"
 
+    def requests_url(self) -> str:
+        """生成 requests 使用的代理 URL；SOCKS5 默认由代理端解析域名。"""
+
+        protocol = "socks5h" if self.protocol == "socks5" else self.protocol
+        auth = ""
+        if self.username is not None:
+            auth = quote(self.username, safe="")
+            if self.password is not None:
+                auth += f":{quote(self.password, safe='')}"
+            auth += "@"
+        return f"{protocol}://{auth}{self.host}:{self.port}"
+
 
 class BrowserOptions(StrictModel):
     """所有浏览器任务共享的 User-Agent、代理、区域和超时选项。"""
@@ -68,7 +80,6 @@ class RecaptchaV2Request(BrowserOptions):
     url: HttpUrl
     siteKey: str = Field(min_length=1)
     sessionUrl: HttpUrl | None = None
-    submitUrl: HttpUrl | None = None
     maxAudioAttempts: int = Field(default=3, ge=1, le=10)
     query: str = Field(default="AAA", max_length=256)
 
@@ -112,7 +123,6 @@ class SessionRequest(StrictModel):
     url: HttpUrl
     headers: dict[str, str] = Field(default_factory=dict)
     body: str | None = None
-    waitUntil: Literal["commit", "domcontentloaded", "load", "networkidle"] = "domcontentloaded"
     returnHtml: bool = True
     timeoutMs: int = Field(default=120_000, ge=1_000, le=600_000)
 

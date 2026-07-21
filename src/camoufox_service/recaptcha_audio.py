@@ -9,6 +9,8 @@ from io import BytesIO
 
 import requests
 
+from .models import ProxyConfig
+
 
 class AudioChallengeError(RuntimeError):
     pass
@@ -31,6 +33,7 @@ class AudioChallengeProcessor:
         user_agent: str,
         audio_cache: dict[str, bytes],
         page,
+        proxy: ProxyConfig | None = None,
         request_timeout: float = 15,
     ):
         self.user_agent = user_agent
@@ -40,6 +43,9 @@ class AudioChallengeProcessor:
         self.session = requests.Session()
         self.session.trust_env = False
         self.session.headers["User-Agent"] = user_agent
+        if proxy:
+            proxy_url = proxy.requests_url()
+            self.session.proxies.update({"http": proxy_url, "https": proxy_url})
         self._configure_audio_tools()
 
     def close(self) -> None:

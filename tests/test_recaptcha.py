@@ -1,13 +1,12 @@
 from dataclasses import dataclass
 
-from camoufox_service.models import RecaptchaV2Request
+from camoufox_service.models import ProxyConfig, RecaptchaV2Request
 from camoufox_service.recaptcha import (
     RecaptchaAudioSolver,
     RecaptchaError,
     RecaptchaV2Solver,
     build_recaptcha_html,
     choose_fresh_audio_url,
-    redact_url,
 )
 from camoufox_service.recaptcha_audio import AudioChallengeProcessor
 from camoufox_service.worker import BrowserRuntime
@@ -66,7 +65,7 @@ class FakeAudioSolver:
     def __init__(self, page, **kwargs):
         self.page = page
 
-    def solve_recaptcha(self, processor, **kwargs):
+    def solve_recaptcha(self, processor, *, max_attempts):
         return FakeSolveResult()
 
 
@@ -92,14 +91,37 @@ def test_recaptcha_template_escapes_values():
     assert "g-recaptcha-response" in html
 
 
-def test_sensitive_audio_url_is_redacted():
-    assert redact_url("https://google.com/recaptcha/api2/payload?p=secret&k=key") == (
-        "https://google.com/recaptcha/api2/payload"
-    )
-
-
 def test_audio_transcript_normalization_is_stable():
     assert AudioChallengeProcessor.normalize_transcript("  Seven,  TWO!! ") == "seven two"
+
+
+def test_audio_fallback_session_uses_task_proxy(monkeypatch):
+    monkeypatch.setattr(
+        AudioChallengeProcessor,
+        "_configure_audio_tools",
+        classmethod(lambda cls: None),
+    )
+    proxy = ProxyConfig(
+        protocol="socks5",
+        host="127.0.0.1",
+        port=8501,
+        username="user",
+        password="pass",
+    )
+
+    processor = AudioChallengeProcessor(
+        user_agent="FakeFox/1.0",
+        audio_cache={},
+        page=object(),
+        proxy=proxy,
+    )
+    try:
+        assert processor.session.proxies == {
+            "http": "socks5h://user:pass@127.0.0.1:8501",
+            "https": "socks5h://user:pass@127.0.0.1:8501",
+        }
+    finally:
+        processor.close()
 
 
 def test_audio_retry_requires_a_new_url():
@@ -139,6 +161,31 @@ def test_solver_returns_token_session_and_closes_context():
     assert result.userAgent == "FakeFox/1.0"
     assert result.cookies[0].name == "sid"
     assert browser.context.closed is True
+
+
+def test_solver_passes_task_proxy_to_audio_processor():
+    browser = FakeBrowser()
+    processor_options = {}
+
+    def processor_factory(**options):
+        processor_options.update(options)
+        return FakeProcessor()
+
+    solver = RecaptchaV2Solver(
+        browser,
+        audio_solver_factory=FakeAudioSolver,
+        processor_factory=processor_factory,
+    )
+    request = RecaptchaV2Request(
+        url="https://example.test/captcha",
+        siteKey="site-key",
+        proxy="socks5h://127.0.0.1:8501",
+    )
+
+    result = solver.solve(request)
+
+    assert result.status == "solved"
+    assert processor_options["proxy"] == request.proxy
 
 
 def test_worker_dispatches_recaptcha_job(monkeypatch):

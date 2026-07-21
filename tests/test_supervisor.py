@@ -77,6 +77,60 @@ async def test_start_fails_when_worker_health_probe_fails(tmp_path):
     assert supervisor.ready() is False
 
 
+@pytest.mark.asyncio
+async def test_partial_start_failure_stops_workers_already_started(monkeypatch):
+    class StartedWorker:
+        pid = 12345
+
+        def __init__(self):
+            self.stopped = False
+
+        async def stop(self):
+            self.stopped = True
+
+    first_worker = StartedWorker()
+    supervisor = WorkerSupervisor(["fake"], workers=2)
+
+    async def start_worker(worker_id):
+        if worker_id == 0:
+            supervisor._workers[worker_id] = first_worker
+            return first_worker
+        raise WorkerError("second worker failed")
+
+    monkeypatch.setattr(supervisor, "_start_worker", start_worker)
+
+    with pytest.raises(WorkerError, match="second worker failed"):
+        await supervisor.start()
+
+    assert first_worker.stopped is True
+    assert supervisor.ready() is False
+
+
+@pytest.mark.asyncio
+async def test_health_probe_does_not_consume_job_recycle_limit(fake_worker_command):
+    supervisor = WorkerSupervisor(
+        fake_worker_command,
+        workers=1,
+        queue_size=1,
+        task_timeout=1,
+        max_jobs=2,
+    )
+    await supervisor.start()
+    first_pid = supervisor.pids[0]
+    first_generation = supervisor.generation(0)
+    try:
+        await supervisor.request("echo", {"value": 1})
+
+        assert supervisor.pids[0] == first_pid
+        assert supervisor.generation(0) == first_generation
+
+        await supervisor.request("echo", {"value": 2})
+        assert supervisor.pids[0] != first_pid
+        assert supervisor.generation(0) > first_generation
+    finally:
+        await supervisor.stop()
+
+
 def test_worker_escalates_browser_crash_to_supervisor():
     runtime = BrowserRuntime()
 

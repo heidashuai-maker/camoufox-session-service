@@ -118,7 +118,8 @@ class WorkerProcess:
             self.pending.pop(request_id, None)
             raise WorkerExited(f"worker {self.worker_id} pipe closed") from exc
         result = await future
-        self.jobs += 1
+        if kind != "health":
+            self.jobs += 1
         if kind == "session.create":
             self.sessions += 1
         elif kind == "session.destroy":
@@ -226,8 +227,12 @@ class WorkerSupervisor:
     async def start(self) -> None:
         if self._workers:
             return
-        for worker_id in range(self.worker_count):
-            await self._start_worker(worker_id)
+        try:
+            for worker_id in range(self.worker_count):
+                await self._start_worker(worker_id)
+        except Exception:
+            await self.stop()
+            raise
 
     async def _start_worker(self, worker_id: int) -> WorkerProcess:
         """启动并健康检查 Worker，成功后递增该槽位代际。"""
