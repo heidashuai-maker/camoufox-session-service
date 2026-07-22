@@ -81,7 +81,6 @@ class RecaptchaV2Request(BrowserOptions):
     siteKey: str = Field(min_length=1)
     sessionUrl: HttpUrl | None = None
     maxAudioAttempts: int = Field(default=3, ge=1, le=10)
-    query: str = Field(default="AAA", max_length=256)
 
 
 class TurnstileRequest(BrowserOptions):

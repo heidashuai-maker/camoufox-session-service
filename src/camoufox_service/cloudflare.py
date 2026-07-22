@@ -6,11 +6,12 @@ import os
 import re
 import time
 from collections.abc import Callable
+from contextlib import suppress
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from .browser import is_browser_crash_error
-from .models import ChallengeRequest, Cookie, ErrorInfo, SessionRequest, TaskResult
+from .browser import cookie_from_dict, is_browser_crash_error
+from .models import ChallengeRequest, ErrorInfo, SessionRequest, TaskResult
 
 _CHALLENGE_TITLES = {"just a moment..."}
 _CHALLENGE_SELECTORS = (
@@ -42,22 +43,6 @@ _PATCH_SCRIPT = """(() => {
   Object.defineProperty(MouseEvent.prototype, 'screenY', { value: screenY });
 })();
 """
-
-
-def _cookie(raw: dict[str, Any]) -> Cookie:
-    """把 DrissionPage Cookie 字典转换为稳定的公共模型。"""
-
-    expires = raw.get("expires", -1)
-    return Cookie(
-        name=str(raw.get("name") or ""),
-        value=str(raw.get("value") or ""),
-        domain=str(raw.get("domain") or ""),
-        path=str(raw.get("path") or "/"),
-        expires=float(expires) if expires is not None else -1,
-        httpOnly=bool(raw.get("httpOnly", False)),
-        secure=bool(raw.get("secure", False)),
-        sameSite=raw.get("sameSite"),
-    )
 
 
 def _packet_status(packet: Any) -> int | None:
@@ -154,7 +139,7 @@ class DrissionChallengeBrowser:
             sessionId=session_id,
             finalUrl=self.url,
             httpStatus=http_status,
-            cookies=[_cookie(raw) for raw in self.cookies],
+            cookies=[cookie_from_dict(raw) for raw in self.cookies],
             userAgent=self.user_agent,
             html=self.html if request.returnHtml else None,
             elapsedMs=int((time.monotonic() - started) * 1000),
@@ -174,7 +159,7 @@ class DrissionChallengeBrowser:
 
     @property
     def user_agent(self) -> str | None:
-        value = getattr(self.page, "user_agent", None)
+        value = self.page.user_agent
         return str(value) if value else None
 
     @property
@@ -184,10 +169,8 @@ class DrissionChallengeBrowser:
     def close(self) -> None:
         page, self.page = self.page, None
         if page is not None:
-            try:
+            with suppress(Exception):
                 page.close()
-            except Exception:
-                pass
         context_id, self._context_id = self._context_id, ""
         if context_id:
             self._owner.dispose(context_id)
@@ -284,10 +267,8 @@ class DrissionBrowser:
     def close(self) -> None:
         browser, self._browser = self._browser, None
         if browser is not None:
-            try:
+            with suppress(Exception):
                 browser.quit(force=True)
-            except Exception:
-                pass
         if self._profile is not None:
             self._profile.cleanup()
             self._profile = None
@@ -306,7 +287,7 @@ def _result(
         status=status,
         finalUrl=browser.url,
         httpStatus=http_status,
-        cookies=[_cookie(raw) for raw in browser.cookies],
+        cookies=[cookie_from_dict(raw) for raw in browser.cookies],
         userAgent=browser.user_agent,
         html=browser.html if request.returnHtml else None,
         elapsedMs=elapsed_ms,
@@ -348,7 +329,7 @@ def solve_cloudflare_challenge(
             browser_factory = owned_browser.open
         browser = browser_factory(request)
         http_status = browser.navigate(str(request.url))
-        title = str(getattr(browser, "title", "")).strip().lower()
+        title = browser.title.strip().lower()
         html = str(browser.html or "").lower()
         if "attention required" in title or any(marker in html for marker in _BLOCK_MARKERS):
             return _result(
@@ -386,9 +367,7 @@ def solve_cloudflare_challenge(
         if not challenge_found:
             return success("no_challenge", http_status)
 
-        reset = getattr(browser, "reset", None)
-        if reset:
-            reset()
+        browser.reset()
         deadline = started + request.timeoutMs / 1000
         while clock() < deadline:
             response_status = browser.click_verify()

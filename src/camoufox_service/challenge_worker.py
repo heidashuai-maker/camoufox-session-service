@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import json
-import sys
 import uuid
 from collections.abc import Callable
+from contextlib import suppress
 
 from .cloudflare import DrissionBrowser, solve_cloudflare_challenge
 from .models import ChallengeRequest, SessionRequest, TaskResult
+from .protocol import run_worker
 
 
 class ChallengeRuntime:
@@ -75,34 +75,14 @@ class ChallengeRuntime:
 
     def close(self) -> None:
         for context in self.sessions.values():
-            try:
+            with suppress(Exception):
                 context.close()
-            except Exception:
-                pass
         self.sessions.clear()
         self.browser.close()
 
 
 def main() -> None:
-    """运行与 Supervisor 兼容的逐行 JSON 请求/响应循环。"""
-
-    runtime = ChallengeRuntime()
-    try:
-        for line in sys.stdin:
-            request_id = None
-            try:
-                message = json.loads(line)
-                request_id = message.get("id")
-                result = runtime.handle(str(message.get("kind")), message.get("payload") or {})
-                response = {"id": request_id, "result": result}
-            except Exception as exc:
-                response = {
-                    "id": request_id,
-                    "error": {"type": type(exc).__name__, "message": str(exc)},
-                }
-            print(json.dumps(response, ensure_ascii=False), flush=True)
-    finally:
-        runtime.close()
+    run_worker(ChallengeRuntime())
 
 
 if __name__ == "__main__":

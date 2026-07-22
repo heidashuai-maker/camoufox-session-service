@@ -42,23 +42,21 @@ def context_options(options: BrowserOptions) -> dict[str, Any]:
 
 
 def cookies_from_context(context) -> list[Cookie]:
-    """将 Playwright Cookie 转换为稳定的 API Cookie 模型。"""
+    return [cookie_from_dict(raw) for raw in context.cookies()]
 
-    cookies = []
-    for raw in context.cookies():
-        cookies.append(
-            Cookie(
-                name=str(raw.get("name") or ""),
-                value=str(raw.get("value") or ""),
-                domain=str(raw.get("domain") or ""),
-                path=str(raw.get("path") or "/"),
-                expires=float(raw.get("expires", -1)),
-                httpOnly=bool(raw.get("httpOnly", False)),
-                secure=bool(raw.get("secure", False)),
-                sameSite=raw.get("sameSite"),
-            )
-        )
-    return cookies
+
+def cookie_from_dict(raw: dict[str, Any]) -> Cookie:
+    expires = raw.get("expires", -1)
+    return Cookie(
+        name=str(raw.get("name") or ""),
+        value=str(raw.get("value") or ""),
+        domain=str(raw.get("domain") or ""),
+        path=str(raw.get("path") or "/"),
+        expires=float(expires) if expires is not None else -1,
+        httpOnly=bool(raw.get("httpOnly", False)),
+        secure=bool(raw.get("secure", False)),
+        sameSite=raw.get("sameSite"),
+    )
 
 
 def page_user_agent(page) -> str | None:

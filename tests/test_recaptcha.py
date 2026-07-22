@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+import pytest
 
 from camoufox_service.models import ProxyConfig, RecaptchaV2Request
 from camoufox_service.recaptcha import (
@@ -55,18 +55,12 @@ class FakeBrowser:
         return self.context
 
 
-@dataclass
-class FakeSolveResult:
-    token: str = "recaptcha-token"
-    attempts: int = 1
-
-
 class FakeAudioSolver:
     def __init__(self, page, **kwargs):
         self.page = page
 
     def solve_recaptcha(self, processor, *, max_attempts):
-        return FakeSolveResult()
+        return "recaptcha-token"
 
 
 class FakeProcessor:
@@ -82,13 +76,14 @@ def test_recaptcha_template_escapes_values():
         RecaptchaV2Request(
             url="https://example.test",
             siteKey='bad"<script>',
-            query='A"<script>',
         )
     )
 
     assert 'bad"<script>' not in html
-    assert 'A"<script>' not in html
+    assert 'name="search"' not in html
+    assert 'name="corpname"' not in html
     assert "g-recaptcha-response" in html
+    assert 'style="display:none"' in html
 
 
 def test_audio_transcript_normalization_is_stable():
@@ -127,6 +122,23 @@ def test_audio_fallback_session_uses_task_proxy(monkeypatch):
 def test_audio_retry_requires_a_new_url():
     assert choose_fresh_audio_url("https://audio/2", "https://audio/1") == "https://audio/2"
     assert choose_fresh_audio_url("https://audio/1", "https://audio/1") is None
+
+
+def test_navigation_failure_is_not_retried_implicitly():
+    class Page:
+        def __init__(self):
+            self.calls = 0
+
+        def goto(self, *_args, **_kwargs):
+            self.calls += 1
+            raise RuntimeError("navigation failed")
+
+    page = Page()
+
+    with pytest.raises(RuntimeError, match="navigation failed"):
+        RecaptchaV2Solver._navigate(page, "https://example.test", 1_000)
+
+    assert page.calls == 1
 
 
 def test_audio_url_poll_tolerates_source_not_ready():

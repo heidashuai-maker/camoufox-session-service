@@ -65,6 +65,9 @@ class FakeChallengeBrowser:
         self.last_state = next(self.states, self.last_state)
         return self.last_state
 
+    def reset(self):
+        return None
+
     def click_verify(self):
         self.clicks += 1
         return 200

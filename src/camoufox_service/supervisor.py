@@ -10,6 +10,7 @@ import subprocess
 import time
 import uuid
 from collections.abc import Sequence
+from contextlib import suppress
 
 import psutil
 
@@ -167,16 +168,12 @@ class WorkerProcess:
                 root = psutil.Process(pid)
                 processes = [*root.children(recursive=True), root]
                 for process in processes:
-                    try:
+                    with suppress(psutil.Error):
                         process.terminate()
-                    except psutil.Error:
-                        pass
                 _, alive = psutil.wait_procs(processes, timeout=2)
                 for process in alive:
-                    try:
+                    with suppress(psutil.Error):
                         process.kill()
-                    except psutil.Error:
-                        pass
             except (psutil.Error, OSError):
                 if self.process and self.process.returncode is None:
                     self.process.kill()
@@ -184,14 +181,10 @@ class WorkerProcess:
             try:
                 await asyncio.wait_for(self.process.wait(), timeout=3)
             except TimeoutError:
-                try:
+                with suppress(ProcessLookupError):
                     self.process.kill()
-                except ProcessLookupError:
-                    pass
-                try:
+                with suppress(TimeoutError, ProcessLookupError):
                     await asyncio.wait_for(self.process.wait(), timeout=1)
-                except (TimeoutError, ProcessLookupError):
-                    pass
         current = asyncio.current_task()
         tasks = []
         for task in (self.reader_task, self.stderr_task):

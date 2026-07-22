@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import json
-import sys
+from contextlib import suppress
 from dataclasses import dataclass
 
 from . import config
@@ -15,6 +14,7 @@ from .models import (
     TaskResult,
     TurnstileRequest,
 )
+from .protocol import run_worker
 from .recaptcha import solve_recaptcha
 from .turnstile import solve_turnstile
 
@@ -54,10 +54,8 @@ class BrowserRuntime:
         """关闭全部 Session Context，再退出 Camoufox 管理器。"""
 
         for session in self.sessions.values():
-            try:
+            with suppress(Exception):
                 session.context.close()
-            except Exception:
-                pass
         self.sessions.clear()
         if self.manager:
             self.manager.__exit__(None, None, None)
@@ -138,13 +136,12 @@ class BrowserRuntime:
 
         if kind == "health":
             browser = self._browser()
-            connected = not hasattr(browser, "is_connected") or browser.is_connected()
-            if not connected:
+            if not browser.is_connected():
                 raise RuntimeError("Camoufox browser is not connected")
             return {
                 "status": "ok",
                 "sessions": len(self.sessions),
-                "browserVersion": getattr(browser, "version", None),
+                "browserVersion": browser.version,
             }
         if kind == "turnstile.solve":
             return self.serialize_result(
@@ -164,25 +161,7 @@ class BrowserRuntime:
 
 
 def main() -> None:
-    """运行 JSONL Worker 协议循环，并保证退出时关闭浏览器。"""
-
-    runtime = BrowserRuntime()
-    try:
-        for line in sys.stdin:
-            request_id = None
-            try:
-                message = json.loads(line)
-                request_id = message.get("id")
-                result = runtime.handle(str(message.get("kind")), message.get("payload") or {})
-                response = {"id": request_id, "result": result}
-            except Exception as exc:
-                response = {
-                    "id": request_id,
-                    "error": {"type": type(exc).__name__, "message": str(exc)},
-                }
-            print(json.dumps(response, ensure_ascii=False), flush=True)
-    finally:
-        runtime.close()
+    run_worker(BrowserRuntime())
 
 
 if __name__ == "__main__":

@@ -95,6 +95,13 @@ def test_removed_request_fields_are_rejected():
             waitUntil="networkidle",
         )
 
+    with pytest.raises(ValidationError, match="query"):
+        RecaptchaV2Request(
+            url="https://example.test",
+            siteKey="key",
+            query="legacy form value",
+        )
+
 
 def test_task_result_has_stable_envelope():
     result = TaskResult(status="solved", token="abc", elapsedMs=12)

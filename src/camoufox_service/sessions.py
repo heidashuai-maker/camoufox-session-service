@@ -6,6 +6,9 @@ import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Literal
+
+SessionEngine = Literal["camoufox", "drissionpage"]
 
 
 @dataclass(slots=True)
@@ -13,6 +16,7 @@ class SessionRecord:
     """记录 Session 所属 Worker、Worker 代际和有效时间。"""
 
     session_id: str
+    engine: SessionEngine
     worker_id: int
     worker_generation: int
     created_at: float
@@ -22,6 +26,7 @@ class SessionRecord:
     def as_dict(self) -> dict:
         return {
             "sessionId": self.session_id,
+            "engine": self.engine,
             "workerId": self.worker_id,
             "createdAt": self.created_at,
             "lastUsedAt": self.last_used_at,
@@ -41,6 +46,7 @@ class SessionRegistry:
         self,
         worker_id: int,
         *,
+        engine: SessionEngine,
         worker_generation: int,
         session_id: str | None = None,
         ttl_seconds: int | None = None,
@@ -50,6 +56,7 @@ class SessionRegistry:
         now = self.clock()
         record = SessionRecord(
             session_id=session_id or uuid.uuid4().hex,
+            engine=engine,
             worker_id=worker_id,
             worker_generation=worker_generation,
             created_at=now,

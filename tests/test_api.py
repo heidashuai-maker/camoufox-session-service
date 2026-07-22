@@ -40,6 +40,9 @@ class FakeSupervisor:
     def generation(self, worker_id):
         return self.generations[worker_id]
 
+    def metrics(self):
+        return {"workers": 1, "readyWorkers": 1}
+
 
 def settings():
     return Settings(

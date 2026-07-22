@@ -9,5 +9,11 @@ def test_container_uses_init_process_before_xvfb_run():
     assert 'CMD ["xvfb-run"' in dockerfile
 
 
+def test_compose_does_not_add_a_second_init_process():
+    compose = Path("compose.yaml").read_text(encoding="utf-8")
+
+    assert "init: true" not in compose
+
+
 if __name__ == "__main__":
     test_container_uses_init_process_before_xvfb_run()

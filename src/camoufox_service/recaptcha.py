@@ -5,7 +5,7 @@ from __future__ import annotations
 import html
 import random
 import time
-from dataclasses import dataclass
+from collections.abc import Callable
 from urllib.parse import urlsplit
 
 from .browser import (
@@ -30,12 +30,6 @@ class RecaptchaRateLimited(RecaptchaError):
     pass
 
 
-@dataclass
-class RecaptchaSolveResult:
-    token: str
-    attempts: int
-
-
 def choose_fresh_audio_url(current: str, previous: str | None) -> str | None:
     return current if current and current != previous else None
 
@@ -43,17 +37,14 @@ def choose_fresh_audio_url(current: str, previous: str | None) -> str | None:
 def build_recaptcha_html(request: RecaptchaV2Request) -> str:
     site_key = html.escape(request.siteKey, quote=True)
     language = html.escape(request.locale or "en-US", quote=True)
-    query = html.escape(request.query or "AAA", quote=True)
     return f"""<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><title>reCAPTCHA</title></head>
 <body>
   <form id="recaptcha-form">
-    <input name="search" value="1">
-    <input name="corpname" value="{query}">
     <script src="https://www.google.com/recaptcha/api.js?hl={language}" async defer></script>
     <div class="g-recaptcha" data-sitekey="{site_key}" data-callback="onSolved"></div>
-    <textarea id="g-recaptcha-response" name="g-recaptcha-response"></textarea>
+    <textarea id="g-recaptcha-response" name="g-recaptcha-response" style="display:none"></textarea>
     <script>
       window.onSolved = function (token) {{
         window.__recaptchaToken = token;
@@ -249,12 +240,12 @@ class RecaptchaAudioSolver:
         self.page.keyboard.type(text.lower(), delay=random.randint(35, 90))
         self.frames.click(frame.locator("#recaptcha-verify-button").first)
 
-    def solve_recaptcha(self, processor, *, max_attempts: int = 3) -> RecaptchaSolveResult:
+    def solve_recaptcha(self, processor, *, max_attempts: int = 3) -> str:
         """优先读取已有 Token，再按复选框、音频 Challenge 顺序求解。"""
 
         existing = self.token()
         if existing:
-            return RecaptchaSolveResult(existing, 0)
+            return existing
         visible = self._wait(
             lambda: (
                 self.frames.checkbox_visible()
@@ -274,7 +265,7 @@ class RecaptchaAudioSolver:
                 self.timeout,
             )
             if solved and (self.token() or self.frames.checked()):
-                return RecaptchaSolveResult(self._wait_token(), 0)
+                return self._wait_token()
         if not self.frames.audio_ready():
             frame = self.frames.challenge()
             self.frames.click(frame.locator("#recaptcha-audio-button").first)
@@ -302,7 +293,7 @@ class RecaptchaAudioSolver:
             if text:
                 self._submit_audio(text)
                 if self._wait(lambda: self.token() or self.frames.checked(), self.timeout):
-                    return RecaptchaSolveResult(self._wait_token(), attempt)
+                    return self._wait_token()
             if attempt < max_attempts:
                 self.frames.click(self.frames.challenge().locator("#recaptcha-reload-button").first)
         raise RecaptchaError(f"audio challenge failed after {max_attempts} attempts")
@@ -324,23 +315,20 @@ class RecaptchaV2Solver:
 
     @staticmethod
     def _navigate(page, url: str, timeout_ms: int) -> None:
-        last_error = None
-        for attempt in range(1, 3):
-            try:
-                page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
-                return
-            except Exception as exc:
-                last_error = exc
-                time.sleep(attempt)
-        raise last_error or RecaptchaError("navigation failed")
+        page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
 
     @staticmethod
     def _setup_network(
-        page, request: RecaptchaV2Request, phase: dict, audio_cache: dict[str, bytes]
-    ) -> None:
+        page, request: RecaptchaV2Request, audio_cache: dict[str, bytes]
+    ) -> Callable[[], None]:
         """缓存音频响应，并在目标 Origin 下提供最小组件页面。"""
 
         target = str(request.url).rstrip("/")
+        component_enabled = False
+
+        def enable_component() -> None:
+            nonlocal component_enabled
+            component_enabled = True
 
         def remember_audio(response):
             if "google.com/recaptcha/api2/payload" not in response.url:
@@ -355,7 +343,7 @@ class RecaptchaV2Solver:
         def route_request(route):
             current = route.request.url.rstrip("/")
             resource_type = route.request.resource_type
-            if phase["value"] == "captcha" and current == target and resource_type == "document":
+            if component_enabled and current == target and resource_type == "document":
                 route.fulfill(
                     status=200,
                     content_type="text/html; charset=utf-8",
@@ -371,6 +359,7 @@ class RecaptchaV2Solver:
 
         page.on("response", remember_audio)
         page.route("**/*", route_request)
+        return enable_component
 
     def solve(self, request: RecaptchaV2Request) -> TaskResult:
         """准备 Session 页面和组件页面，执行音频求解并统一归类错误。"""
@@ -381,11 +370,10 @@ class RecaptchaV2Solver:
         try:
             context = self.browser.new_context(**context_options(request))
             page = context.new_page()
-            phase = {"value": "session"}
             audio_cache: dict[str, bytes] = {}
-            self._setup_network(page, request, phase, audio_cache)
+            enable_component = self._setup_network(page, request, audio_cache)
             self._navigate(page, str(request.sessionUrl or request.url), request.timeoutMs)
-            phase["value"] = "captcha"
+            enable_component()
             self._navigate(page, str(request.url), request.timeoutMs)
             page.wait_for_selector(".g-recaptcha", timeout=min(request.timeoutMs, 15_000))
             user_agent = page_user_agent(page)
@@ -395,15 +383,15 @@ class RecaptchaV2Solver:
                 page=page,
                 proxy=request.proxy,
             )
-            solved = self.audio_solver_factory(page, timeout=15, token_timeout=25).solve_recaptcha(
+            token = self.audio_solver_factory(page, timeout=15, token_timeout=25).solve_recaptcha(
                 processor,
                 max_attempts=request.maxAudioAttempts,
             )
-            if len(solved.token) < 10:
+            if len(token) < 10:
                 raise RecaptchaError("reCAPTCHA returned an invalid token")
             return TaskResult(
                 status="solved",
-                token=solved.token,
+                token=token,
                 finalUrl=str(page.url),
                 cookies=cookies_from_context(context),
                 userAgent=user_agent,

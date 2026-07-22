@@ -1,27 +1,61 @@
 # Camoufox Session Service
 
-一个独立的 Python 浏览器任务服务，通过精简的 HTTP API 调度 Camoufox 与隔离的 Chromium Challenge Worker。项目面向需要浏览器渲染、CAPTCHA 组件加载、Cloudflare Managed Challenge 处理以及浏览器 Session 复用的场景。
+[![CI](https://github.com/heidashuai-maker/camoufox-session-service/actions/workflows/ci.yml/badge.svg)](https://github.com/heidashuai-maker/camoufox-session-service/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green.svg)
 
-## 功能范围
+一个面向浏览器验证场景的小型 HTTP 服务。它把 Camoufox 和 Chromium 放进受监管的 Worker 进程，为 Turnstile、reCAPTCHA v2、Cloudflare Challenge Page 以及后续 Session 复用提供统一 API。
 
-- reCAPTCHA v2 复选框与音频 Challenge。
-- Turnstile 最小组件和真实页面两种加载策略。
-- 独立 DrissionPage/Chromium Worker 复用长期浏览器，并用任务级 Context 处理整页 Cloudflare Managed Challenge。
-- 持久浏览器上下文，以及基于同一 Session 的后续请求。
-- 有界任务队列、硬超时、进程树替换、Worker 回收与运行指标。
+项目可以独立运行，不依赖早期的 `turnstile-token-service`，也不需要 Node.js、Puppeteer、Selenium 或 FlareSolverr。
 
-本项目不依赖历史 `turnstile-token-service`、Puppeteer、Selenium、FlareSolverr 或其他同级仓库。组件任务和持久 Session 使用 Camoufox；整页 Challenge 使用独立的 DrissionPage/Chromium Worker，两个浏览器后端不共享生命周期。
+## 能力与引擎
 
-## 环境要求
+| 场景 | 引擎 | 返回内容 |
+| --- | --- | --- |
+| Turnstile 独立组件或页面组件 | Camoufox | Token、Cookie、User-Agent |
+| reCAPTCHA v2 复选框/音频流程 | Camoufox | Token、Cookie、User-Agent |
+| Cloudflare Challenge Page | DrissionPage + Chromium | 页面状态、Cookie、可选 HTML |
+| 挑战后的连续访问 | 原浏览器 Context | `sessionId`、页面内容、更新后的 Cookie |
 
-- Python 3.11+
-- Camoufox 浏览器二进制
-- Chromium 与可用的图形显示；Docker 镜像使用 Xvfb
-- `ffmpeg` 和 `ffprobe`，用于 reCAPTCHA 音频格式转换
+Camoufox 更适合组件级验证；整页 Managed Challenge 使用 Chromium。两个引擎各自拥有独立的进程池，但共用同一套队列、硬超时、Worker 回收、Session 绑定和运行指标。
 
-## 本地运行
+### 真实组件截图
 
-Linux：
+以下图片由项目代码在 Linux Docker 环境中使用官方测试密钥生成，未写入 Token 或 Cookie。
+
+| Turnstile 加载 | Turnstile 完成 |
+| --- | --- |
+| ![Turnstile widget loading](assets/demo/turnstile-before.png) | ![Turnstile widget solved](assets/demo/turnstile-after.png) |
+
+![reCAPTCHA v2 test widget](assets/demo/recaptcha-widget.png)
+
+官方测试密钥只用于验证组件加载、回调捕获和资源清理，不代表真实站点通过率。
+
+## 快速开始
+
+Docker 是最省事的运行方式，镜像已包含 Camoufox、Chromium、Xvfb、FFmpeg 和最小 init 进程。
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+curl http://127.0.0.1:3000/health/ready
+```
+
+就绪响应：
+
+```json
+{
+  "status": "ready",
+  "workers": {
+    "camoufox": [22],
+    "challenge": [115]
+  }
+}
+```
+
+接口文档位于 `http://127.0.0.1:3000/docs`。
+
+本地开发：
 
 ```bash
 python -m venv .venv
@@ -31,41 +65,33 @@ python -m camoufox fetch
 python -m camoufox_service
 ```
 
-Windows 激活虚拟环境：
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-```
-
-服务默认监听 `http://127.0.0.1:3000`。接口文档位于 `/docs`，就绪检查位于 `/health/ready`。
-
 ## API
 
-| 方法 | 路径 | 作用 |
+| 方法 | 路径 | 用途 |
 | --- | --- | --- |
-| `POST` | `/v1/turnstile/solve` | 加载 Turnstile 最小组件或真实页面组件 |
-| `POST` | `/v1/recaptcha/v2/solve` | 处理 reCAPTCHA v2 复选框与音频 Challenge |
-| `POST` | `/v1/challenge/solve` | 处理整页 Cloudflare Managed Challenge 并导出浏览器身份 |
-| `POST` | `/v1/sessions` | 创建持久浏览器 Session |
+| `POST` | `/v1/turnstile/solve` | 加载 Turnstile 独立组件或真实页面组件 |
+| `POST` | `/v1/recaptcha/v2/solve` | 执行 reCAPTCHA v2 流程 |
+| `POST` | `/v1/challenge/solve` | 处理整页 Cloudflare Challenge |
+| `POST` | `/v1/sessions` | 创建 Camoufox Session |
 | `GET` | `/v1/sessions` | 查看当前 Session |
-| `POST` | `/v1/sessions/{sessionId}/request` | 在指定 Session 内发送请求 |
-| `DELETE` | `/v1/sessions/{sessionId}` | 删除 Session 并关闭其浏览器上下文 |
+| `POST` | `/v1/sessions/{id}/request` | 在原浏览器身份内继续请求 |
+| `DELETE` | `/v1/sessions/{id}` | 关闭 Context 并删除 Session |
 
-### Turnstile 最小组件
+### Turnstile 独立组件
 
 ```bash
 curl -X POST http://127.0.0.1:3000/v1/turnstile/solve \
   -H "Content-Type: application/json" \
   -d '{
-    "url": "https://example.test",
-    "siteKey": "1x00000000000000000000AA",
+    "url": "https://authorized.example/",
+    "siteKey": "SITE_KEY",
     "strategy": "minimal"
   }'
 ```
 
-`strategy: "minimal"` 会在保持目标 Origin 的前提下加载独立组件；`strategy: "page"` 会访问真实页面并读取页面已有的 Widget。接口接受类型化的 `action`、`cData`、`appearance`、`execution` 和 `language` 选项，不接受调用方注入任意 JavaScript。
+`minimal` 在目标 Origin 下加载独立 Widget；`page` 访问真实页面并读取页面已有的 Widget。
 
-### reCAPTCHA v2 复选框与音频挑战
+### reCAPTCHA v2
 
 ```bash
 curl -X POST http://127.0.0.1:3000/v1/recaptcha/v2/solve \
@@ -73,31 +99,27 @@ curl -X POST http://127.0.0.1:3000/v1/recaptcha/v2/solve \
   -d '{
     "url": "https://authorized.example/captcha",
     "sessionUrl": "https://authorized.example/",
-    "siteKey": "site-key",
+    "siteKey": "SITE_KEY",
     "maxAudioAttempts": 3
   }'
 ```
 
-当前只实现 reCAPTCHA v2 复选框与音频流程，不包含 v3 和 Enterprise。
+当前范围是 v2 复选框与音频流程，不包含 v3 和 Enterprise。
 
-### 整页 Challenge
+### Challenge Page 与 Session 复用
 
 ```bash
 curl -X POST http://127.0.0.1:3000/v1/challenge/solve \
   -H "Content-Type: application/json" \
   -d '{
-    "url":"https://authorized.example/",
-    "proxy":"socks5h://proxy.example:8501",
-    "timeoutMs":120000,
-    "returnHtml":false,
-    "retainSession":true,
-    "ttlSeconds":900
+    "url": "https://authorized.example/",
+    "proxy": "socks5h://proxy.example:8501",
+    "retainSession": true,
+    "ttlSeconds": 900
   }'
 ```
 
-该接口由独立的 DrissionPage/Chromium Worker 执行，可能返回 `solved`、`no_challenge`、`blocked`、`cloudflare_error`、`timeout`、`browser_crashed` 或 `failed`。每个 Worker 延迟启动并复用一个 Chromium；每个任务创建独立 Browser Context，可分别指定无认证 HTTP、HTTPS 或 SOCKS 代理。`returnHtml` 默认是 `false`；开启后响应仍受 `WORKER_STREAM_LIMIT_BYTES` 限制。
-
-默认情况下任务结束后会销毁 Context。设置 `retainSession:true` 后，成功结果包含 `sessionId`，原 Context 会保留到 TTL 到期或显式删除。后续 GET 请求可直接复用通过挑战时的 Chromium、代理、Cookie 和网络指纹：
+设置 `retainSession:true` 后，成功结果会包含 `sessionId`。后续 GET 请求继续使用原 Chromium Context，因此代理、Cookie、缓存和网络指纹不会发生切换：
 
 ```bash
 curl -X POST http://127.0.0.1:3000/v1/sessions/SESSION_ID/request \
@@ -105,118 +127,72 @@ curl -X POST http://127.0.0.1:3000/v1/sessions/SESSION_ID/request \
   -d '{"method":"GET","url":"https://authorized.example/","returnHtml":true}'
 ```
 
-Challenge Session 当前只支持 GET；删除方式仍为 `DELETE /v1/sessions/SESSION_ID`。如果 Context 销毁失败，则关闭当前 Chromium，并使绑定该 Worker generation 的 Session 失效。
-
-成功结果包含实际 User-Agent 和 Cookie；复用 `cf_clearance` 时必须保持相同出口 IP、代理及 User-Agent。该接口提高已知 Managed Challenge 的通过能力，但不承诺固定通过率。
-
-### 持久 Session
-
-创建空浏览器上下文：
+Challenge Session 当前只支持 GET。使用结束后应调用：
 
 ```bash
-curl -X POST http://127.0.0.1:3000/v1/sessions \
-  -H "Content-Type: application/json" \
-  -d '{"ttlSeconds":900}'
+curl -X DELETE http://127.0.0.1:3000/v1/sessions/SESSION_ID
 ```
 
-将求解结果中的 Cookie 放回服务，并保持相同 User-Agent 和代理身份：
+## 工作方式
 
-```bash
-curl -X POST http://127.0.0.1:3000/v1/sessions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "ttlSeconds": 900,
-    "userAgent": "USER_AGENT_FROM_SOLVER_RESULT",
-    "cookies": [{
-      "name": "cf_clearance",
-      "value": "COOKIE_VALUE_FROM_SOLVER_RESULT",
-      "domain": ".example.test",
-      "path": "/",
-      "secure": true,
-      "httpOnly": true
-    }]
-  }'
+```mermaid
+flowchart LR
+    Client[HTTP client] --> API[FastAPI]
+    API --> Service[BrowserService]
+    Service --> CamSup[Camoufox Supervisor]
+    Service --> ChrSup[Challenge Supervisor]
+    CamSup --> CamWorker[Camoufox Worker]
+    ChrSup --> ChrWorker[Chromium Worker]
+    CamWorker --> Widget[Turnstile / reCAPTCHA]
+    ChrWorker --> Page[Challenge Page]
+    Service <--> Registry[Session registry]
+    Registry -. worker + generation .-> CamSup
+    Registry -. worker + generation .-> ChrSup
 ```
 
-使用返回的 `sessionId` 发送后续请求：
+每个 Worker 长期持有一个浏览器进程。普通任务创建临时 Context；保留 Session 时，Context 会绑定到创建它的 Worker 和 generation。Worker 一旦重启，旧 Session 返回 HTTP 410，不会静默换成新的浏览器身份。
 
-```bash
-curl -X POST http://127.0.0.1:3000/v1/sessions/SESSION_ID/request \
-  -H "Content-Type: application/json" \
-  -d '{"method":"GET","url":"https://example.test","returnHtml":true}'
-```
+## 配置与资源
 
-删除 Session：`DELETE /v1/sessions/SESSION_ID`。
+完整默认值见 [`.env.example`](.env.example)。常用配置分为四组：
 
-Cookie、User-Agent 和代理身份属于同一浏览器身份，复用时必须保持一致。Session 会绑定创建它的 Worker ID 与 generation；如果该 Worker 重启，服务会使 Session 失效并返回 HTTP 410，而不是静默切换到新的浏览器身份。
+- `CAMOUFOX_*`：组件 Worker 数量、队列、超时和回收阈值。
+- `CHALLENGE_*`：Chromium Worker 数量、队列、超时和回收阈值。
+- `CAMOUFOX_SESSION_TTL_SECONDS`：Session 默认有效期。
+- `WORKER_STREAM_LIMIT_BYTES`：Worker 单条 JSON 响应上限，默认 16 MiB。
 
-## 配置
+`AUTH_TOKEN` 非空时，业务接口和 `/metrics` 需要 `Authorization: Bearer <token>`。
 
-复制 `.env.example` 为 `.env`。`AUTH_TOKEN` 非空时，业务接口和指标接口要求：
+浏览器 Worker 会占用较多内存。Compose 默认限制容器使用 4 GiB；增加 Worker 数量前，应先根据 `/metrics` 中的 RSS 数据调整容器上限。
 
-```text
-Authorization: Bearer <token>
-```
-
-| 环境变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `HOST` | `0.0.0.0` | HTTP 监听地址 |
-| `PORT` | `3000` | HTTP 监听端口 |
-| `AUTH_TOKEN` | 空 | 可选 Bearer Token |
-| `CAMOUFOX_WORKERS` | `1` | Worker 子进程数量 |
-| `CAMOUFOX_QUEUE_SIZE` | `8` | 等待队列容量 |
-| `CAMOUFOX_TASK_TIMEOUT_SECONDS` | `120` | 单任务硬超时 |
-| `WORKER_STREAM_LIMIT_BYTES` | `16777216` | Worker 单行 JSON 响应上限（16 MiB） |
-| `CAMOUFOX_SESSION_TTL_SECONDS` | `900` | 默认 Session 生存时间 |
-| `CAMOUFOX_MAX_JOBS_PER_WORKER` | `50` | Worker 最大任务数 |
-| `CAMOUFOX_MAX_WORKER_LIFETIME_SECONDS` | `1800` | Worker 最大生存时间 |
-| `CAMOUFOX_MAX_WORKER_RSS_MB` | `1536` | Worker RSS 回收阈值 |
-| `CAMOUFOX_HEADLESS` | `true` | `true`、`false` 或 `virtual` |
-| `CHALLENGE_WORKERS` | `1` | DrissionPage Challenge Worker 数量 |
-| `CHALLENGE_QUEUE_SIZE` | `2` | Challenge 等待队列容量 |
-| `CHALLENGE_TASK_TIMEOUT_SECONDS` | `180` | Challenge Supervisor 默认硬超时 |
-| `CHALLENGE_MAX_JOBS_PER_WORKER` | `10` | Challenge Worker 最大任务数 |
-| `CHALLENGE_MAX_WORKER_LIFETIME_SECONDS` | `900` | Challenge Worker 最大生存时间 |
-| `CHALLENGE_MAX_WORKER_RSS_MB` | `2048` | Challenge Worker RSS 回收阈值 |
-| `CHROMIUM_PATH` | `/usr/bin/chromium` | Chromium 可执行文件路径 |
-
-## 测试
+## 开发与测试
 
 ```bash
 python -m ruff check .
 python -m ruff format --check .
 python -m pytest -q
+python -m build
 ```
 
-默认测试可重复执行，不访问受保护站点。两个可选浏览器集成测试分别验证 Camoufox Widget 链路和 DrissionPage Context 隔离链路：
+默认测试不访问受保护站点。浏览器集成测试需显式启用：
 
 ```bash
 RUN_BROWSER_TESTS=1 python -m pytest tests/test_browser_integration.py -q
 RUN_CHALLENGE_BROWSER_TESTS=1 python -m pytest tests/test_challenge_browser_integration.py -q
 ```
 
-第一个测试使用 Cloudflare 官方 Dummy Sitekey，只验证浏览器启动、文档拦截、Widget 渲染、回调捕获和资源清理；第二个测试使用本地 Challenge Fixture，验证长期 Chromium 下创建、销毁任务 Context 的行为。两者都不衡量真实站点通过率。真实验收测试必须在自有站点或明确授权的目标上单独执行。
+## 使用边界
 
-## Docker
+- Token 通常短期、单次有效，仍需由目标站点服务端验证。
+- `cf_clearance`、User-Agent 和代理出口属于同一浏览器身份，不能随意拆开复用。
+- 普通 HTTP 客户端可能因 TLS 指纹不同而再次触发挑战。`curl_cffi` 可作为优化路径，但应保持同一代理并导入完整 Cookie 集；仅使用 `JSESSIONID` 不够。
+- Challenge 是否通过取决于站点策略、代理质量和浏览器身份，本项目不承诺固定通过率。
+- 请只用于自有系统或已明确授权的目标。
 
-```bash
-docker compose build
-docker compose up -d
-curl http://127.0.0.1:3000/health/ready
-```
+## 设计参考
 
-镜像同时包含 Camoufox、Chromium、Xvfb 和 `tini`；即使不通过 Compose 启动，也会由最小 init 进程转发信号并回收浏览器后代进程。每个 Camoufox Worker 独占一个长期浏览器实例；每个 Challenge Worker 也延迟启动并复用一个 Chromium，但为每个任务创建和销毁独立 Browser Context。任务超过硬超时后，Supervisor 会终止完整进程树并创建替代 Worker。
+项目参考了 [Camoufox](https://github.com/daijro/camoufox)、[FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) 和 [cf-clearance-scraper](https://github.com/ZFC-Digital/cf-clearance-scraper) 的浏览器生命周期与 Session 思路，但代码、API 和 Worker 模型均为本项目独立实现。
 
-Compose 的 `4g` 是容器内存上限，不是预分配内存。两个 `*_MAX_WORKER_RSS_MB` 是单个 Worker 的主动回收阈值；增加 Worker 数量时，应同时按实际峰值提高容器内存上限，避免容器先于 Worker 回收机制触发 OOM。
+## License
 
-当前固定使用已通过目标站点验证的 `DrissionPage 4.1.0.0b14`，避免自动升级改变浏览器控制行为。该版本的包元数据声明为 BSD License；升级依赖前应重新检查许可证和真实站点回归结果。
-
-## 能力边界
-
-- Turnstile Token 通常短期、单次有效，仍需由站点服务端执行验证。
-- 获取普通 Session Cookie 或 `__cf_bm` 不等于取得有效 `cf_clearance`。
-- 即使取得 `cf_clearance`，普通 HTTP 客户端也可能因 TLS/网络指纹不同而被拒绝；优先复用 Challenge 返回的浏览器 `sessionId`。需要切换到 HTTP 客户端时，可尝试 `curl_cffi` 的 Chrome impersonation，但必须保持同一代理出口和 User-Agent，并导入完整 Cookie 集；仅复用 `JSESSIONID` 或单个 Cloudflare Cookie 不可靠。
-- Managed Challenge 是否通过取决于站点策略、网络信誉、浏览器身份和交互要求；DrissionPage 后端不等同于稳定或百分之百通过。
-- Challenge 后端暂不支持带用户名和密码的代理；无认证 HTTP、HTTPS、SOCKS 代理沿用结构化 `proxy` 模型。
-- reCAPTCHA 音频识别依赖外部音频工具和语音识别服务，可能受到语言、速率限制和网络质量影响。
-- 请只对自有系统或已明确授权的目标使用本服务。
+[MIT](LICENSE)
