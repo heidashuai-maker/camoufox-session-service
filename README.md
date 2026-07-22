@@ -189,10 +189,6 @@ RUN_CHALLENGE_BROWSER_TESTS=1 python -m pytest tests/test_challenge_browser_inte
 - Challenge 是否通过取决于站点策略、代理质量和浏览器身份，本项目不承诺固定通过率。
 - 请只用于自有系统或已明确授权的目标。
 
-## 设计参考
-
-项目参考了 [Camoufox](https://github.com/daijro/camoufox)、[FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) 和 [cf-clearance-scraper](https://github.com/ZFC-Digital/cf-clearance-scraper) 的浏览器生命周期与 Session 思路，但代码、API 和 Worker 模型均为本项目独立实现。
-
 ## License
 
 [MIT](LICENSE)
