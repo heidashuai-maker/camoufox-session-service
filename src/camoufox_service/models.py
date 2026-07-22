@@ -103,7 +103,9 @@ class TurnstileRequest(BrowserOptions):
 
 class ChallengeRequest(BrowserOptions):
     url: HttpUrl
-    returnHtml: bool = True
+    returnHtml: bool = False
+    retainSession: bool = False
+    ttlSeconds: int | None = Field(default=None, ge=30, le=86_400)
 
 
 class SessionCreateRequest(BrowserOptions):
@@ -148,6 +150,8 @@ class ErrorInfo(StrictModel):
 Outcome = Literal[
     "solved",
     "no_challenge",
+    "blocked",
+    "cloudflare_error",
     "timeout",
     "browser_crashed",
     "failed",

@@ -24,6 +24,14 @@ class FakeSupervisor:
 
     async def request_with_worker(self, kind, payload, timeout=None):
         self.calls.append((kind, payload, None))
+        self.timeouts.append(timeout)
+        if kind == "challenge.solve":
+            return {
+                "status": "no_challenge",
+                "sessionId": "challenge-session-1",
+                "httpStatus": 200,
+                "elapsedMs": 1,
+            }, 0
         return {"status": "solved", "sessionId": payload["sessionId"], "elapsedMs": 1}, 0
 
     def ready(self):
@@ -91,6 +99,43 @@ def test_challenge_route_uses_dedicated_supervisor():
     assert camoufox_supervisor.calls == []
     assert challenge_supervisor.calls[0][0] == "challenge.solve"
     assert challenge_supervisor.timeouts == [55.0]
+
+
+def test_retained_challenge_session_keeps_challenge_worker_affinity():
+    camoufox_supervisor = FakeSupervisor()
+    challenge_supervisor = FakeSupervisor()
+    with TestClient(
+        create_app(
+            settings=settings(),
+            supervisor=camoufox_supervisor,
+            challenge_supervisor=challenge_supervisor,
+        )
+    ) as client:
+        solved = client.post(
+            "/v1/challenge/solve",
+            json={
+                "url": "https://example.test",
+                "retainSession": True,
+                "ttlSeconds": 300,
+            },
+        )
+        session_id = solved.json()["sessionId"]
+        requested = client.post(
+            f"/v1/sessions/{session_id}/request",
+            json={"url": "https://example.test/account"},
+        )
+        deleted = client.delete(f"/v1/sessions/{session_id}")
+
+    assert requested.status_code == 200
+    assert deleted.status_code == 204
+    assert camoufox_supervisor.calls == []
+    assert [call[0] for call in challenge_supervisor.calls] == [
+        "challenge.solve",
+        "challenge.session.request",
+        "challenge.session.destroy",
+    ]
+    assert challenge_supervisor.calls[1][2] == 0
+    assert challenge_supervisor.calls[2][2] == 0
 
 
 def test_session_lifecycle_keeps_worker_affinity():

@@ -10,7 +10,7 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 from .browser import is_browser_crash_error
-from .models import ChallengeRequest, Cookie, ErrorInfo, TaskResult
+from .models import ChallengeRequest, Cookie, ErrorInfo, SessionRequest, TaskResult
 
 _CHALLENGE_TITLES = {"just a moment..."}
 _CHALLENGE_SELECTORS = (
@@ -28,6 +28,10 @@ _CHALLENGE_MARKERS = (
     "cf-chl-",
     "cf-turnstile-response",
     "challenge-stage",
+)
+_BLOCK_MARKERS = (
+    "sorry, you have been blocked",
+    "you are unable to access",
 )
 
 _PATCH_SCRIPT = """(() => {
@@ -135,6 +139,27 @@ class DrissionChallengeBrowser:
     def wait(self, milliseconds: int) -> None:
         self.page.wait(milliseconds / 1000)
 
+    def request(self, request: SessionRequest, session_id: str) -> TaskResult:
+        """在已通过挑战的 Context 中继续执行同身份 GET 请求。"""
+
+        if request.method != "GET":
+            raise ValueError("challenge sessions currently support GET requests only")
+        if request.headers:
+            self.page.run_cdp("Network.setExtraHTTPHeaders", headers=request.headers)
+        self.page.set.timeouts(page_load=_navigation_timeout_seconds(request.timeoutMs))
+        started = time.monotonic()
+        http_status = self.navigate(str(request.url))
+        return TaskResult(
+            status="no_challenge",
+            sessionId=session_id,
+            finalUrl=self.url,
+            httpStatus=http_status,
+            cookies=[_cookie(raw) for raw in self.cookies],
+            userAgent=self.user_agent,
+            html=self.html if request.returnHtml else None,
+            elapsedMs=int((time.monotonic() - started) * 1000),
+        )
+
     @property
     def url(self) -> str:
         return str(self.page.url)
@@ -142,6 +167,10 @@ class DrissionChallengeBrowser:
     @property
     def html(self) -> str:
         return str(self.page.html or "")
+
+    @property
+    def title(self) -> str:
+        return str(self.page.title or "")
 
     @property
     def user_agent(self) -> str | None:
@@ -289,6 +318,7 @@ def solve_cloudflare_challenge(
     request: ChallengeRequest,
     *,
     browser_factory: Callable[[ChallengeRequest], Any] | None = None,
+    retain_browser: Callable[[Any], str] | None = None,
     clock: Callable[[], float] = time.monotonic,
 ) -> TaskResult:
     """在隔离 Context 中求解整页 Challenge 并导出可复用浏览器身份。"""
@@ -296,21 +326,65 @@ def solve_cloudflare_challenge(
     started = clock()
     browser = None
     owned_browser = None
+    retained = False
+
+    def success(status: str, http_status: int | None) -> TaskResult:
+        nonlocal retained
+        result = _result(
+            browser,
+            request,
+            status=status,
+            http_status=http_status,
+            elapsed_ms=int((clock() - started) * 1000),
+        )
+        if request.retainSession and retain_browser is not None:
+            result.sessionId = retain_browser(browser)
+            retained = True
+        return result
+
     try:
         if browser_factory is None:
             owned_browser = DrissionBrowser()
             browser_factory = owned_browser.open
         browser = browser_factory(request)
         http_status = browser.navigate(str(request.url))
-        challenge_found = browser.challenge_present()
-        if not challenge_found:
+        title = str(getattr(browser, "title", "")).strip().lower()
+        html = str(browser.html or "").lower()
+        if "attention required" in title or any(marker in html for marker in _BLOCK_MARKERS):
             return _result(
                 browser,
                 request,
-                status="no_challenge",
+                status="blocked",
                 http_status=http_status,
                 elapsed_ms=int((clock() - started) * 1000),
+                error=ErrorInfo(
+                    type="CLOUDFLARE_BLOCKED",
+                    message="Cloudflare blocked this browser or network identity",
+                    retryable=True,
+                    stage="challenge",
+                ),
             )
+        if (
+            http_status is not None
+            and http_status >= 500
+            and ("cloudflare" in html or "web server is returning an unknown error" in title)
+        ):
+            return _result(
+                browser,
+                request,
+                status="cloudflare_error",
+                http_status=http_status,
+                elapsed_ms=int((clock() - started) * 1000),
+                error=ErrorInfo(
+                    type="CLOUDFLARE_UPSTREAM_ERROR",
+                    message=f"Cloudflare returned HTTP {http_status}",
+                    retryable=True,
+                    stage="challenge",
+                ),
+            )
+        challenge_found = browser.challenge_present()
+        if not challenge_found:
+            return success("no_challenge", http_status)
 
         reset = getattr(browser, "reset", None)
         if reset:
@@ -321,13 +395,7 @@ def solve_cloudflare_challenge(
             if response_status is not None:
                 http_status = response_status
             if not browser.challenge_present():
-                return _result(
-                    browser,
-                    request,
-                    status="solved",
-                    http_status=http_status,
-                    elapsed_ms=int((clock() - started) * 1000),
-                )
+                return success("solved", http_status)
             browser.wait(500)
 
         return _result(
@@ -356,7 +424,7 @@ def solve_cloudflare_challenge(
             ),
         )
     finally:
-        if browser is not None:
+        if browser is not None and not retained:
             browser.close()
         if owned_browser is not None:
             owned_browser.close()

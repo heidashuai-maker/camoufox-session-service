@@ -21,13 +21,24 @@ class FakeClock:
 
 
 class FakeChallengeBrowser:
-    def __init__(self, states, *, clock=None, navigate_error=None):
+    def __init__(
+        self,
+        states,
+        *,
+        clock=None,
+        navigate_error=None,
+        http_status=403,
+        title="",
+        html="<html>passed</html>",
+    ):
         self.states = iter(states)
         self.last_state = False
         self.clock = clock
         self.navigate_error = navigate_error
         self.url = "https://example.test/final"
-        self.html = "<html>passed</html>"
+        self.html = html
+        self.title = title
+        self.http_status = http_status
         self.user_agent = "Chromium/126"
         self.cookies = [
             {
@@ -48,7 +59,7 @@ class FakeChallengeBrowser:
         if self.navigate_error:
             raise self.navigate_error
         self.url = str(url)
-        return 403
+        return self.http_status
 
     def challenge_present(self):
         self.last_state = next(self.states, self.last_state)
@@ -75,12 +86,41 @@ def solve(browser, **request_values):
 def test_page_without_challenge_returns_no_challenge_and_closes_browser():
     browser = FakeChallengeBrowser([False])
 
-    result = solve(browser)
+    result = solve(browser, returnHtml=True)
 
     assert result.status == "no_challenge"
     assert result.httpStatus == 403
     assert result.html == "<html>passed</html>"
     assert browser.closed is True
+
+
+def test_attention_required_page_returns_blocked():
+    browser = FakeChallengeBrowser(
+        [False],
+        title="Attention Required! | Cloudflare",
+        html="<h1>Sorry, you have been blocked</h1>",
+    )
+
+    result = solve(browser)
+
+    assert result.status == "blocked"
+    assert result.error is not None
+    assert result.error.type == "CLOUDFLARE_BLOCKED"
+
+
+def test_cloudflare_520_page_returns_cloudflare_error():
+    browser = FakeChallengeBrowser(
+        [False],
+        http_status=520,
+        title="example.test | 520: Web server is returning an unknown error",
+        html="<footer>Performance &amp; security by Cloudflare</footer>",
+    )
+
+    result = solve(browser)
+
+    assert result.status == "cloudflare_error"
+    assert result.error is not None
+    assert result.error.type == "CLOUDFLARE_UPSTREAM_ERROR"
 
 
 def test_detected_challenge_is_clicked_until_clearance_is_available():
@@ -94,6 +134,20 @@ def test_detected_challenge_is_clicked_until_clearance_is_available():
     assert result.userAgent == "Chromium/126"
     assert browser.clicks == 1
     assert browser.closed is True
+
+
+def test_successful_challenge_can_retain_browser_context():
+    browser = FakeChallengeBrowser([True, False])
+
+    result = solve_cloudflare_challenge(
+        ChallengeRequest(url="https://example.test", retainSession=True),
+        browser_factory=lambda _: browser,
+        retain_browser=lambda retained: "challenge-session-1",
+        clock=FakeClock(),
+    )
+
+    assert result.sessionId == "challenge-session-1"
+    assert browser.closed is False
 
 
 def test_challenge_timeout_returns_typed_error_and_closes_browser():

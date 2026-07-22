@@ -50,6 +50,7 @@ class Settings:
     max_worker_lifetime_seconds: int
     max_worker_rss_mb: int
     headless: bool | str
+    worker_stream_limit_bytes: int = 16 * 1024 * 1024
     challenge_workers: int = 1
     challenge_queue_size: int = 2
     challenge_task_timeout_seconds: int = 180
@@ -73,6 +74,9 @@ class Settings:
             max_worker_lifetime_seconds=_integer("CAMOUFOX_MAX_WORKER_LIFETIME_SECONDS", 1800),
             max_worker_rss_mb=_integer("CAMOUFOX_MAX_WORKER_RSS_MB", 1536),
             headless=_headless("CAMOUFOX_HEADLESS", True),
+            worker_stream_limit_bytes=_integer(
+                "WORKER_STREAM_LIMIT_BYTES", 16 * 1024 * 1024, minimum=65_536
+            ),
             challenge_workers=_integer("CHALLENGE_WORKERS", 1),
             challenge_queue_size=_integer("CHALLENGE_QUEUE_SIZE", 2),
             challenge_task_timeout_seconds=_integer("CHALLENGE_TASK_TIMEOUT_SECONDS", 180),

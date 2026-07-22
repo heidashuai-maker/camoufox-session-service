@@ -35,10 +35,17 @@ class QueueFull(WorkerError):
 class WorkerProcess:
     """管理单个 Worker 子进程及其 JSONL 请求、响应和资源统计。"""
 
-    def __init__(self, worker_id: int, command: Sequence[str], cwd: str | None = None):
+    def __init__(
+        self,
+        worker_id: int,
+        command: Sequence[str],
+        cwd: str | None = None,
+        stream_limit_bytes: int = 16 * 1024 * 1024,
+    ):
         self.worker_id = worker_id
         self.command = list(command)
         self.cwd = cwd
+        self.stream_limit_bytes = stream_limit_bytes
         self.process: asyncio.subprocess.Process | None = None
         self.pending: dict[str, asyncio.Future] = {}
         self.reader_task: asyncio.Task | None = None
@@ -62,6 +69,7 @@ class WorkerProcess:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             creationflags=creationflags,
+            limit=self.stream_limit_bytes,
         )
         self.started_at = time.monotonic()
         self.reader_task = asyncio.create_task(self._read_stdout())
@@ -86,6 +94,14 @@ class WorkerProcess:
                     logger.warning(
                         "worker %s emitted invalid protocol output: %s", self.worker_id, exc
                     )
+        except ValueError:
+            self._fail_pending(
+                WorkerError(
+                    f"worker {self.worker_id} response exceeded {self.stream_limit_bytes} bytes"
+                )
+            )
+            if self.process and self.process.returncode is None:
+                self.process.kill()
         finally:
             self._fail_pending(WorkerExited(f"worker {self.worker_id} exited"))
 
@@ -120,9 +136,9 @@ class WorkerProcess:
         result = await future
         if kind != "health":
             self.jobs += 1
-        if kind == "session.create":
+        if kind == "session.create" or (kind == "challenge.solve" and result.get("sessionId")):
             self.sessions += 1
-        elif kind == "session.destroy":
+        elif kind in {"session.destroy", "challenge.session.destroy"}:
             self.sessions = max(0, self.sessions - 1)
         return result
 
@@ -201,6 +217,7 @@ class WorkerSupervisor:
         max_jobs: int = 50,
         max_lifetime: int = 1800,
         max_rss_mb: int = 1536,
+        stream_limit_bytes: int = 16 * 1024 * 1024,
     ):
         self.command = list(command)
         self.worker_count = workers
@@ -210,6 +227,7 @@ class WorkerSupervisor:
         self.max_jobs = max_jobs
         self.max_lifetime = max_lifetime
         self.max_rss_mb = max_rss_mb
+        self.stream_limit_bytes = stream_limit_bytes
         self._workers: dict[int, WorkerProcess] = {}
         self._generations = {worker_id: 0 for worker_id in range(workers)}
         self._locks = {worker_id: asyncio.Lock() for worker_id in range(workers)}
@@ -237,7 +255,12 @@ class WorkerSupervisor:
     async def _start_worker(self, worker_id: int) -> WorkerProcess:
         """启动并健康检查 Worker，成功后递增该槽位代际。"""
 
-        worker = WorkerProcess(worker_id, self.command, self.cwd)
+        worker = WorkerProcess(
+            worker_id,
+            self.command,
+            self.cwd,
+            stream_limit_bytes=self.stream_limit_bytes,
+        )
         await worker.start()
         try:
             await asyncio.wait_for(worker.request("health", {}), timeout=max(10, self.task_timeout))

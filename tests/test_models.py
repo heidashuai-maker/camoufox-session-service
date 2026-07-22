@@ -32,6 +32,23 @@ def test_requests_reject_unknown_fields():
         ChallengeRequest(url="https://example.test", legacyMode="waf-session")
 
 
+def test_challenge_omits_html_by_default():
+    request = ChallengeRequest(url="https://example.test")
+
+    assert request.returnHtml is False
+
+
+def test_challenge_can_retain_browser_session():
+    request = ChallengeRequest(
+        url="https://example.test",
+        retainSession=True,
+        ttlSeconds=300,
+    )
+
+    assert request.retainSession is True
+    assert request.ttlSeconds == 300
+
+
 def test_challenge_rejects_removed_wait_only_option():
     with pytest.raises(ValidationError, match="waitSeconds"):
         ChallengeRequest(url="https://example.test", waitSeconds=30)
@@ -106,11 +123,13 @@ def test_session_accepts_cookies_returned_by_solver():
 def test_settings_read_worker_limits(monkeypatch):
     monkeypatch.setenv("CAMOUFOX_WORKERS", "3")
     monkeypatch.setenv("CAMOUFOX_QUEUE_SIZE", "9")
+    monkeypatch.setenv("WORKER_STREAM_LIMIT_BYTES", "1048576")
 
     settings = Settings.from_env()
 
     assert settings.workers == 3
     assert settings.queue_size == 9
+    assert settings.worker_stream_limit_bytes == 1_048_576
 
 
 def test_settings_accept_virtual_display(monkeypatch):

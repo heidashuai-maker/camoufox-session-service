@@ -1,5 +1,5 @@
 import sys
-import textwrap
+from pathlib import Path
 
 import pytest
 
@@ -14,27 +14,44 @@ from camoufox_service.worker import BrowserRuntime
 
 
 @pytest.fixture
-def fake_worker_command(tmp_path):
-    script = tmp_path / "fake_worker.py"
-    script.write_text(
-        textwrap.dedent(
-            """
-            import json
-            import sys
-            import time
-
-            for line in sys.stdin:
-                request = json.loads(line)
-                kind = request["kind"]
-                if kind == "sleep":
-                    time.sleep(float(request["payload"]["seconds"]))
-                result = {"echo": request["payload"], "pid": __import__("os").getpid()}
-                print(json.dumps({"id": request["id"], "result": result}), flush=True)
-            """
-        ),
-        encoding="utf-8",
-    )
+def fake_worker_command():
+    script = Path(__file__).parent / "fixtures" / "fake_worker.py"
     return [sys.executable, "-u", str(script)]
+
+
+@pytest.mark.asyncio
+async def test_worker_accepts_json_response_larger_than_asyncio_default(fake_worker_command):
+    supervisor = WorkerSupervisor(
+        fake_worker_command,
+        workers=1,
+        queue_size=1,
+        task_timeout=2,
+        stream_limit_bytes=128 * 1024,
+    )
+    await supervisor.start()
+    try:
+        result = await supervisor.request("large", {"bytes": 80 * 1024})
+    finally:
+        await supervisor.stop()
+
+    assert len(result["body"]) == 80 * 1024
+
+
+@pytest.mark.asyncio
+async def test_worker_reports_response_larger_than_configured_limit(fake_worker_command):
+    supervisor = WorkerSupervisor(
+        fake_worker_command,
+        workers=1,
+        queue_size=1,
+        task_timeout=2,
+        stream_limit_bytes=64 * 1024,
+    )
+    await supervisor.start()
+    try:
+        with pytest.raises(WorkerError, match="response exceeded 65536 bytes"):
+            await supervisor.request("large", {"bytes": 80 * 1024})
+    finally:
+        await supervisor.stop()
 
 
 @pytest.mark.asyncio

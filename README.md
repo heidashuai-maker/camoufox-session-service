@@ -89,11 +89,23 @@ curl -X POST http://127.0.0.1:3000/v1/challenge/solve \
     "url":"https://authorized.example/",
     "proxy":"socks5h://proxy.example:8501",
     "timeoutMs":120000,
-    "returnHtml":true
+    "returnHtml":false,
+    "retainSession":true,
+    "ttlSeconds":900
   }'
 ```
 
-该接口由独立的 DrissionPage/Chromium Worker 执行，可能返回 `solved`、`no_challenge`、`timeout`、`browser_crashed` 或 `failed`。每个 Worker 延迟启动并复用一个 Chromium；每个任务创建独立 Browser Context，可分别指定无认证 HTTP、HTTPS 或 SOCKS 代理。任务结束后会显式销毁 Context，不会把 Cookie、缓存和存储带入下一个任务；如果 Context 销毁失败，则关闭当前 Chromium 并由下一个任务延迟重建。
+该接口由独立的 DrissionPage/Chromium Worker 执行，可能返回 `solved`、`no_challenge`、`blocked`、`cloudflare_error`、`timeout`、`browser_crashed` 或 `failed`。每个 Worker 延迟启动并复用一个 Chromium；每个任务创建独立 Browser Context，可分别指定无认证 HTTP、HTTPS 或 SOCKS 代理。`returnHtml` 默认是 `false`；开启后响应仍受 `WORKER_STREAM_LIMIT_BYTES` 限制。
+
+默认情况下任务结束后会销毁 Context。设置 `retainSession:true` 后，成功结果包含 `sessionId`，原 Context 会保留到 TTL 到期或显式删除。后续 GET 请求可直接复用通过挑战时的 Chromium、代理、Cookie 和网络指纹：
+
+```bash
+curl -X POST http://127.0.0.1:3000/v1/sessions/SESSION_ID/request \
+  -H "Content-Type: application/json" \
+  -d '{"method":"GET","url":"https://authorized.example/","returnHtml":true}'
+```
+
+Challenge Session 当前只支持 GET；删除方式仍为 `DELETE /v1/sessions/SESSION_ID`。如果 Context 销毁失败，则关闭当前 Chromium，并使绑定该 Worker generation 的 Session 失效。
 
 成功结果包含实际 User-Agent 和 Cookie；复用 `cf_clearance` 时必须保持相同出口 IP、代理及 User-Agent。该接口提高已知 Managed Challenge 的通过能力，但不承诺固定通过率。
 
@@ -154,6 +166,7 @@ Authorization: Bearer <token>
 | `CAMOUFOX_WORKERS` | `1` | Worker 子进程数量 |
 | `CAMOUFOX_QUEUE_SIZE` | `8` | 等待队列容量 |
 | `CAMOUFOX_TASK_TIMEOUT_SECONDS` | `120` | 单任务硬超时 |
+| `WORKER_STREAM_LIMIT_BYTES` | `16777216` | Worker 单行 JSON 响应上限（16 MiB） |
 | `CAMOUFOX_SESSION_TTL_SECONDS` | `900` | 默认 Session 生存时间 |
 | `CAMOUFOX_MAX_JOBS_PER_WORKER` | `50` | Worker 最大任务数 |
 | `CAMOUFOX_MAX_WORKER_LIFETIME_SECONDS` | `1800` | Worker 最大生存时间 |
@@ -202,6 +215,7 @@ Compose 的 `4g` 是容器内存上限，不是预分配内存。两个 `*_MAX_W
 
 - Turnstile Token 通常短期、单次有效，仍需由站点服务端执行验证。
 - 获取普通 Session Cookie 或 `__cf_bm` 不等于取得有效 `cf_clearance`。
+- 即使取得 `cf_clearance`，普通 HTTP 客户端也可能因 TLS/网络指纹不同而被拒绝；优先复用 Challenge 返回的浏览器 `sessionId`。需要切换到 HTTP 客户端时，可尝试 `curl_cffi` 的 Chrome impersonation，但必须保持同一代理出口和 User-Agent，并导入完整 Cookie 集；仅复用 `JSESSIONID` 或单个 Cloudflare Cookie 不可靠。
 - Managed Challenge 是否通过取决于站点策略、网络信誉、浏览器身份和交互要求；DrissionPage 后端不等同于稳定或百分之百通过。
 - Challenge 后端暂不支持带用户名和密码的代理；无认证 HTTP、HTTPS、SOCKS 代理沿用结构化 `proxy` 模型。
 - reCAPTCHA 音频识别依赖外部音频工具和语音识别服务，可能受到语言、速率限制和网络质量影响。

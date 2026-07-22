@@ -42,6 +42,7 @@ def create_app(
         max_jobs=service_settings.max_jobs_per_worker,
         max_lifetime=service_settings.max_worker_lifetime_seconds,
         max_rss_mb=service_settings.max_worker_rss_mb,
+        stream_limit_bytes=service_settings.worker_stream_limit_bytes,
     )
     service_challenge_supervisor = challenge_supervisor or WorkerSupervisor(
         [sys.executable, "-u", "-m", "camoufox_service.challenge_worker"],
@@ -51,8 +52,10 @@ def create_app(
         max_jobs=service_settings.challenge_max_jobs_per_worker,
         max_lifetime=service_settings.challenge_max_worker_lifetime_seconds,
         max_rss_mb=service_settings.challenge_max_worker_rss_mb,
+        stream_limit_bytes=service_settings.worker_stream_limit_bytes,
     )
     registry = SessionRegistry(service_settings.session_ttl_seconds)
+    challenge_registry = SessionRegistry(service_settings.session_ttl_seconds)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -68,6 +71,7 @@ def create_app(
 
     app = FastAPI(title="camoufox-session-service", version=__version__, lifespan=lifespan)
     app.state.sessions = registry
+    app.state.challenge_sessions = challenge_registry
 
     async def expire_sessions() -> None:
         """回收 Registry 中已过期的记录及其 Worker 浏览器上下文。"""
@@ -76,6 +80,15 @@ def create_app(
             try:
                 await service_supervisor.request(
                     "session.destroy",
+                    {"sessionId": record.session_id},
+                    worker_id=record.worker_id,
+                )
+            except WorkerError:
+                pass
+        for record in challenge_registry.expire():
+            try:
+                await service_challenge_supervisor.request(
+                    "challenge.session.destroy",
                     {"sessionId": record.session_id},
                     worker_id=record.worker_id,
                 )
@@ -128,7 +141,7 @@ def create_app(
         return {
             "camoufox": camoufox,
             "challenge": challenge,
-            "sessions": len(registry.list()),
+            "sessions": len(registry.list()) + len(challenge_registry.list()),
         }
 
     @app.post("/v1/turnstile/solve", response_model=TaskResult, dependencies=[Depends(authorize)])
@@ -137,6 +150,20 @@ def create_app(
 
     @app.post("/v1/challenge/solve", response_model=TaskResult, dependencies=[Depends(authorize)])
     async def challenge_solve(request: ChallengeRequest):
+        if request.retainSession:
+            result, worker_id = await service_challenge_supervisor.request_with_worker(
+                "challenge.solve",
+                request.model_dump(mode="json"),
+                timeout=request.timeoutMs / 1000 + _CHALLENGE_RESULT_GRACE_SECONDS,
+            )
+            if session_id := result.get("sessionId"):
+                challenge_registry.create(
+                    worker_id,
+                    worker_generation=service_challenge_supervisor.generation(worker_id),
+                    session_id=session_id,
+                    ttl_seconds=request.ttlSeconds,
+                )
+            return result
         return await service_challenge_supervisor.request(
             "challenge.solve",
             request.model_dump(mode="json"),
@@ -174,7 +201,16 @@ def create_app(
         for record in registry.list():
             if record.worker_generation != service_supervisor.generation(record.worker_id):
                 registry.delete(record.session_id)
-        return {"sessions": [record.as_dict() for record in registry.list()]}
+        for record in challenge_registry.list():
+            if record.worker_generation != service_challenge_supervisor.generation(
+                record.worker_id
+            ):
+                challenge_registry.delete(record.session_id)
+        sessions = [{**record.as_dict(), "engine": "camoufox"} for record in registry.list()]
+        sessions.extend(
+            {**record.as_dict(), "engine": "drissionpage"} for record in challenge_registry.list()
+        )
+        return {"sessions": sessions}
 
     @app.post(
         "/v1/sessions/{session_id}/request",
@@ -186,32 +222,57 @@ def create_app(
 
         await expire_sessions()
         record = registry.get(session_id)
-        if not record:
-            raise HTTPException(status_code=404, detail="Session not found")
-        if record.worker_generation != service_supervisor.generation(record.worker_id):
-            registry.delete(session_id)
-            raise HTTPException(status_code=410, detail="Session browser worker restarted")
         payload = request.model_dump(mode="json")
         payload["sessionId"] = session_id
-        return await service_supervisor.request(
-            "session.request",
+        if record:
+            if record.worker_generation != service_supervisor.generation(record.worker_id):
+                registry.delete(session_id)
+                raise HTTPException(status_code=410, detail="Session browser worker restarted")
+            return await service_supervisor.request(
+                "session.request",
+                payload,
+                timeout=request.timeoutMs / 1000,
+                worker_id=record.worker_id,
+            )
+        challenge_record = challenge_registry.get(session_id)
+        if not challenge_record:
+            raise HTTPException(status_code=404, detail="Session not found")
+        if challenge_record.worker_generation != service_challenge_supervisor.generation(
+            challenge_record.worker_id
+        ):
+            challenge_registry.delete(session_id)
+            raise HTTPException(status_code=410, detail="Session browser worker restarted")
+        return await service_challenge_supervisor.request(
+            "challenge.session.request",
             payload,
             timeout=request.timeoutMs / 1000,
-            worker_id=record.worker_id,
+            worker_id=challenge_record.worker_id,
         )
 
     @app.delete("/v1/sessions/{session_id}", status_code=204, dependencies=[Depends(authorize)])
     async def delete_session(session_id: str):
         await expire_sessions()
         record = registry.delete(session_id)
-        if not record:
+        if record:
+            if record.worker_generation != service_supervisor.generation(record.worker_id):
+                raise HTTPException(status_code=410, detail="Session browser worker restarted")
+            await service_supervisor.request(
+                "session.destroy",
+                {"sessionId": session_id},
+                worker_id=record.worker_id,
+            )
+            return Response(status_code=204)
+        challenge_record = challenge_registry.delete(session_id)
+        if not challenge_record:
             raise HTTPException(status_code=404, detail="Session not found")
-        if record.worker_generation != service_supervisor.generation(record.worker_id):
+        if challenge_record.worker_generation != service_challenge_supervisor.generation(
+            challenge_record.worker_id
+        ):
             raise HTTPException(status_code=410, detail="Session browser worker restarted")
-        await service_supervisor.request(
-            "session.destroy",
+        await service_challenge_supervisor.request(
+            "challenge.session.destroy",
             {"sessionId": session_id},
-            worker_id=record.worker_id,
+            worker_id=challenge_record.worker_id,
         )
         return Response(status_code=204)
 
